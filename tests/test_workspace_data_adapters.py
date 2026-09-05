@@ -17,7 +17,7 @@ from tools.data import (
     default_catalog,
 )
 
-from adapters.workspace_data import (
+from data.adapters.workspace_data import (
     MIGRATION_MAPPINGS,
     WorkspaceBarAdapter,
     WorkspaceCalendarAdapter,
@@ -536,3 +536,144 @@ def test_real_volume_calendar_session_count() -> None:
         CalendarRequest(market="CN", start=date(2024, 1, 1), end=date(2024, 12, 31))
     )
     assert len(batch.records) == 242  # matches market_breadth row count for 2024
+
+
+# ---------------------------------------------------------------------------
+# downloader + processing (data/ packages)
+# ---------------------------------------------------------------------------
+
+
+def test_dataset_for_scope_reverse_lookup() -> None:
+    from data.downloader import dataset_for_scope
+
+    assert dataset_for_scope("trade_data/daily") == "market.bar"
+    assert dataset_for_scope("calendar/trade_cal") == "calendar.session"
+    assert dataset_for_scope("no/such/scope") is None
+
+
+def test_raw_volume_writer_lands_legacy_layout(tmp_path) -> None:
+    from data.downloader import RawVolumeWriter
+
+    writer = RawVolumeWriter(tmp_path)
+    frame = pd.DataFrame(
+        {
+            "ts_code": ["000001.SZ"],
+            "trade_date": ["20240102"],
+            "close": [9.21],
+        }
+    )
+    written = writer.write_scope("trade_data/daily", frame)
+    assert written == [tmp_path / "2024" / "kline.parquet"]
+    stored = pd.read_parquet(written[0])
+    assert len(stored) == 1
+
+    # second write merges and dedupes on identical rows
+    writer.write_scope("trade_data/daily", frame)
+    stored = pd.read_parquet(written[0])
+    assert len(stored) == 1
+
+
+def test_tushare_downloader_skeleton_with_injected_client(tmp_path) -> None:
+    from data.downloader import TushareDownloader
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def daily(self, **params) -> pd.DataFrame:
+            self.calls.append(params)
+            return pd.DataFrame(
+                {
+                    "ts_code": ["000001.SZ"],
+                    "trade_date": [params["trade_date"]],
+                    "open": [9.39],
+                    "high": [9.42],
+                    "low": [9.21],
+                    "close": [9.21],
+                    "vol": [11583.66],
+                    "amount": [107574.22],
+                }
+            )
+
+    client = FakeClient()
+    downloader = TushareDownloader(client=client, root=tmp_path)
+    written = downloader.download("trade_data/daily", "20240102", "20240103")
+    assert written and all(p.is_file() for p in written)
+    assert len(client.calls) == 2  # two trade days requested
+
+    with pytest.raises(ValueError):
+        TushareDownloader()  # credentials are always injected, never read
+
+
+def test_derived_indicator_adapter_computes_ma(tmp_path) -> None:
+    from data.processing import DerivedIndicatorAdapter
+
+    volume = tmp_path / "vol"
+    _make_volume(volume)  # reuse the synthetic builder below
+    bars = WorkspaceBarAdapter(volume)
+    derived = DerivedIndicatorAdapter(bars)
+    start = datetime(2024, 1, 2, 0, 0, tzinfo=CST)
+    end = datetime(2024, 1, 4, 0, 0, tzinfo=CST)
+    batch = derived.read(
+        DataRequest(
+            dataset="derived.technical_indicator",
+            instruments=("000001.SZ",),
+            start=start,
+            end=end,
+            filters={"indicator": "ma2"},
+        )
+    )
+    rows = {(r["trading_date"]): r for r in batch.records}
+    assert rows[date(2024, 1, 3)]["value"] == pytest.approx((9.21 + 9.1) / 2)
+    assert rows[date(2024, 1, 3)]["indicator"] == "ma2"
+    assert rows[date(2024, 1, 3)]["parameter_hash"]
+    assert "market.bar" in batch.provenance.upstream_request
+
+    with pytest.raises(ValueError):
+        derived.read(
+            DataRequest(
+                dataset="derived.technical_indicator",
+                instruments=("000001.SZ",),
+                start=start,
+                end=end,
+                filters={"indicator": "no-period-name"},
+            )
+        )
+
+
+def _make_volume(root) -> None:
+    """Same synthetic layout as the ``volume`` fixture (for non-fixture tests)."""
+    import pathlib
+
+    root = pathlib.Path(root)
+    _write(
+        pd.DataFrame(
+            {
+                "cal_date": ["20240101", "20240102", "20240103"],
+                "is_open": [0, 1, 1],
+            }
+        ),
+        root / "trade_date.parquet",
+    )
+    _write(
+        pd.DataFrame(
+            {
+                "ts_code": ["000001.SZ", "000001.SZ"],
+                "trade_date": ["20240102", "20240103"],
+                "open": [9.39, 9.21],
+                "high": [9.42, 9.4],
+                "low": [9.21, 9.0],
+                "close": [9.21, 9.1],
+                "pre_close": [9.39, 9.21],
+                "pct_chg": [-1.9, -1.2],
+                "vol": [11583.66, 9000.0],
+                "amount": [107574.22, 90000.0],
+                "adj_factor": [116.7, 116.7],
+                "name": ["平安银行", "平安银行"],
+                "data_type": ["stock", "stock"],
+                "timeframe": ["1d", "1d"],
+                "change": [None, None],
+            }
+        ),
+        root / "2024" / "kline.parquet",
+    )

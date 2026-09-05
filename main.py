@@ -13,7 +13,7 @@ Run:
 
 from __future__ import annotations
 
-from adapters.memory_adapters import InMemoryCalendarAdapter, InMemoryHistoricalAdapter
+from data.adapters.memory_adapters import InMemoryCalendarAdapter, InMemoryHistoricalAdapter
 from config import settings
 from engines.fast import FastBacktestEngine
 from trading_nodes.strategies.buy_close import BuyCloseStrategy

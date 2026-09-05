@@ -12,7 +12,8 @@ venv/
 *.duckdb
 *.duckdb.wal
 *.parquet
-data/
+data/cache/
+data/raw/
 
 # IDE
 .idea/

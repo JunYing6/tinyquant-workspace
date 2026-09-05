@@ -24,7 +24,7 @@ workspace-data = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["trading_nodes*", "adapters*", "config*"]
+include = ["trading_nodes*", "data*", "config*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -8,19 +8,19 @@ have auditable :data:`MIGRATION_MAPPINGS`; datasets without a physical source
 or a phase-2 adapter fail with ``UnsupportedDatasetError`` at the gateway.
 """
 
-from adapters.workspace_data.composite import DailySnapshotCompositeAdapter
-from adapters.workspace_data.gateway import DEFAULT_DATA_ROOT, build_workspace_gateway
-from adapters.workspace_data.historical import (
+from data.adapters.workspace_data.composite import DailySnapshotCompositeAdapter
+from data.adapters.workspace_data.gateway import DEFAULT_DATA_ROOT, build_workspace_gateway
+from data.adapters.workspace_data.historical import (
     WorkspaceBarAdapter,
     WorkspaceCalendarAdapter,
     WorkspaceTableAdapter,
 )
-from adapters.workspace_data.mappings import (
+from data.adapters.workspace_data.mappings import (
     MAPPINGS_BY_DATASET,
     MIGRATION_MAPPINGS,
     MigrationMapping,
 )
-from adapters.workspace_data.ticks import WorkspaceTickAdapter
+from data.adapters.workspace_data.ticks import WorkspaceTickAdapter
 
 __all__ = [
     "DEFAULT_DATA_ROOT",

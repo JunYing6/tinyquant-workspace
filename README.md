@@ -6,8 +6,12 @@
 
 ```text
 trading_nodes/        具体因子、选股器、择时器、风控、策略、Mind、Stream
-adapters/             数据适配器（历史 / 实时 / 交易日历）
-config/               项目配置
+data/                 数据域总包（下载 → 适配 → 加工）
+├── downloader/       数据下载：vendor API -> 原始 parquet 卷（Tushare 骨架）
+├── adapters/         适配接口：原始卷 -> 标准 tools.data 数据集
+│   └── workspace_data/  核心行情链（日历/主数据/行业/K线/日线指标/Tick/快照）
+└── processing/       二级加工：标准数据集 -> 派生数据集（指标计算）
+config/               项目配置（含 DATA_ROOT 数据卷路径）
 main.py               Gateway 组装、build_backtest 工厂和直接运行入口
 run_multi.py          九策略组合的用户侧回测运行器
 tests/                用户节点与集成测试

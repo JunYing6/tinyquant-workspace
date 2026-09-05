@@ -7,13 +7,13 @@ from typing import Any
 
 from tools.data import DataBinding, DataGateway, DataPolicy, default_catalog
 
-from adapters.workspace_data.composite import DailySnapshotCompositeAdapter
-from adapters.workspace_data.historical import (
+from data.adapters.workspace_data.composite import DailySnapshotCompositeAdapter
+from data.adapters.workspace_data.historical import (
     WorkspaceBarAdapter,
     WorkspaceCalendarAdapter,
     WorkspaceTableAdapter,
 )
-from adapters.workspace_data.ticks import WorkspaceTickAdapter
+from data.adapters.workspace_data.ticks import WorkspaceTickAdapter
 
 DEFAULT_DATA_ROOT = "E:/ProgramData"
 

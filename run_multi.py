@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from adapters.strategy_data import InMemoryStrategyData
+from data.adapters.strategy_data import InMemoryStrategyData
 from engines.fast import FastBacktestEngine
 from trading_nodes.strategies.simple_strategies import (
     AtrStopStrategy, BreakoutRiskStrategy, BreakoutStrategy, DualMaStrategy,

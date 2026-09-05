@@ -34,7 +34,7 @@ from tools.data import (
     default_catalog,
 )
 
-from adapters.workspace_data.reader import CST, date_range_days, source_revision
+from data.adapters.workspace_data.reader import CST, date_range_days, source_revision
 
 ADAPTER_NAME = "workspace-tick"
 SCHEMA_VERSION = "1"

@@ -25,7 +25,7 @@ from trading_nodes.strategies.simple_strategies import (
     MomentumPickStrategy,
 )
 from trading_nodes.streams.multi_strategy import MultiStrategyStream
-from adapters.strategy_data import InMemoryStrategyData
+from data.adapters.strategy_data import InMemoryStrategyData
 from engines.fast import FastBacktestEngine
 
 

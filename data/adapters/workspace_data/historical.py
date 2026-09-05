@@ -36,7 +36,7 @@ from tools.data import (
     default_catalog,
 )
 
-from adapters.workspace_data.reader import (
+from data.adapters.workspace_data.reader import (
     ASSET_TYPE_MAP,
     CST,
     MARKET,
