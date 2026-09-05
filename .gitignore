@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
+
+# Local data artifacts
+*.duckdb
+*.duckdb.wal
+*.parquet
+data/
+
+# IDE
+.idea/
+.vscode/
