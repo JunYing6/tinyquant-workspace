@@ -15,14 +15,14 @@ from datetime import datetime
 from typing import Any, List
 
 from tools.data import DataRequest, TableBatch
-from trading_nodes_base.factors.base import KlineTimingFactor
+from trading_nodes_base.factors import KlineTimingFactor
 from trading_nodes.factors.timer.kline.simple_timing import PassiveTimingFactor
 from trading_nodes.factors.timer.tick.intent_executor import IntentExecutorFactor
-from trading_nodes_base.factors.types import SignalIntent
-from trading_nodes_base.methods.base import BaseTimeSelection
+from trading_nodes_base.types import SignalIntent
+from trading_nodes_base.methods import BaseTimeSelection
 from trading_nodes.methods.risk.full_position import FullPositionRisk
 from trading_nodes.methods.selector.fixed import FixedStockPicking
-from trading_nodes_base.strategies.base import BaseStrategy
+from trading_nodes_base.strategies import BaseStrategy
 
 
 class BuyFirstBarFactor(KlineTimingFactor):

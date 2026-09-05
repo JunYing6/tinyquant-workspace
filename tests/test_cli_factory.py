@@ -1,5 +1,5 @@
 from tinyquant_cli.loading import load_backtest_factory
-from trading_nodes_base.strategies.base import BaseStrategy
+from trading_nodes_base.strategies import BaseStrategy
 from tools.data import DataGateway
 
 

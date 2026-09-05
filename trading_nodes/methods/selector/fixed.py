@@ -5,7 +5,7 @@ from typing import Any
 
 import pandas as pd  # type: ignore[import-untyped]
 
-from trading_nodes_base.methods.base import BaseStockPicking
+from trading_nodes_base.methods import BaseStockPicking
 
 
 class FixedStockPicking(BaseStockPicking):

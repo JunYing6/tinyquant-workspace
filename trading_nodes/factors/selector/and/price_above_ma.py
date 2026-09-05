@@ -4,7 +4,7 @@ from typing import Any
 
 import pandas as pd  # type: ignore[import-untyped]
 
-from trading_nodes_base.factors.base import BinarySelectionFactor
+from trading_nodes_base.factors import BinarySelectionFactor
 
 
 class PriceAboveMaSelectionFactor(BinarySelectionFactor):

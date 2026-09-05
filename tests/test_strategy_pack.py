@@ -6,9 +6,9 @@ import pytest
 
 import pandas as pd  # type: ignore[import-untyped]
 
-from trading_nodes_base.factors.types import KlineBar
-from trading_nodes_base.methods.base import BaseRiskControl, BaseStockPicking, BaseTimeSelection, RiskDecision
-from trading_nodes_base.strategies.base import BaseStrategy
+from trading_nodes_base.types import KlineBar
+from trading_nodes_base.methods import BaseRiskControl, BaseStockPicking, BaseTimeSelection, RiskDecision
+from trading_nodes_base.strategies import BaseStrategy
 from trading_nodes.methods.selector.fixed import FixedStockPicking
 from trading_nodes.methods.timer.passive import NoTradeTiming
 from trading_nodes.methods.risk.full_position import FullPositionRisk

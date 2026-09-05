@@ -17,7 +17,7 @@ from adapters.memory_adapters import InMemoryCalendarAdapter, InMemoryHistorical
 from config import settings
 from engines.fast import FastBacktestEngine
 from trading_nodes.strategies.buy_close import BuyCloseStrategy
-from trading_nodes_base.strategies.base import BaseStrategy
+from trading_nodes_base.strategies import BaseStrategy
 from tools.data import DataBinding, DataGateway, DataPolicy, default_catalog
 
 # --- sample daily OHLC data ------------------------------------------------

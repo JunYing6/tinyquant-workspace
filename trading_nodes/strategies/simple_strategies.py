@@ -14,8 +14,8 @@ from trading_nodes.factors.timer.kline.simple_timing import (
     GoldenCrossTimingFactor,
     MeanReversionTimingFactor,
 )
-from trading_nodes_base.methods.base import BaseTimeSelection
-from trading_nodes_base.strategies.base import BaseStrategy
+from trading_nodes_base.methods import BaseTimeSelection
+from trading_nodes_base.strategies import BaseStrategy
 
 
 def _timing(name: str, factors: list) -> BaseTimeSelection:

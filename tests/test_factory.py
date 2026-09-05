@@ -1,6 +1,6 @@
 from engines.fast import FastBacktestEngine
 from main import build_backtest
-from trading_nodes_base.strategies.base import BaseStrategy
+from trading_nodes_base.strategies import BaseStrategy
 from tools.data import DataGateway
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from trading_nodes_base.methods.base import BaseRiskControl, RiskDecision
+from trading_nodes_base.methods import BaseRiskControl, RiskDecision
 
 
 class FullPositionRisk(BaseRiskControl):

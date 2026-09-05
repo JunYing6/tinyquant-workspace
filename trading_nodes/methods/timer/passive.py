@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from trading_nodes_base.factors.base import KlineTimingFactor
+from trading_nodes_base.factors import KlineTimingFactor
 from trading_nodes.factors.timer.tick.intent_executor import IntentExecutorFactor
-from trading_nodes_base.factors.types import KlineBar, SignalIntent
-from trading_nodes_base.methods.base import BaseTimeSelection
+from trading_nodes_base.types import KlineBar, SignalIntent
+from trading_nodes_base.methods import BaseTimeSelection
 
 
 class NoTradeFactor(KlineTimingFactor):

@@ -12,8 +12,8 @@ from trading_nodes.strategies.simple_strategies import (
     MeanReversionStrategy,
     MomentumPickStrategy,
 )
-from trading_nodes_base.minds.base import BaseMind
-from trading_nodes_base.streams.base import BaseStream
+from trading_nodes_base.minds import BaseMind
+from trading_nodes_base.streams import BaseStream
 
 
 class MultiStrategyStream(BaseStream):

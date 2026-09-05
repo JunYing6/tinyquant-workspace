@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from trading_nodes_base.factors.base import TickTimingFactor
-from trading_nodes_base.factors.types import ExecutionRequest, SignalIntent
+from trading_nodes_base.factors import TickTimingFactor
+from trading_nodes_base.types import ExecutionRequest, SignalIntent
 
 
 class IntentExecutorFactor(TickTimingFactor):

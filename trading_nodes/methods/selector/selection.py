@@ -5,12 +5,12 @@ from typing import Any
 
 import pandas as pd  # type: ignore[import-untyped]
 
-from trading_nodes_base.factors.base import BinarySelectionFactor, FloatSelectionFactor
+from trading_nodes_base.factors import BinarySelectionFactor, FloatSelectionFactor
 from importlib import import_module
 
 PriceAboveMaSelectionFactor = import_module("trading_nodes.factors.selector.and.price_above_ma").PriceAboveMaSelectionFactor
 MomentumSelectionFactor = import_module("trading_nodes.factors.selector.float.momentum").MomentumSelectionFactor
-from trading_nodes_base.methods.base import BaseStockPicking
+from trading_nodes_base.methods import BaseStockPicking
 
 
 def _pool_frame(stock_pool: Sequence[str]) -> pd.DataFrame:

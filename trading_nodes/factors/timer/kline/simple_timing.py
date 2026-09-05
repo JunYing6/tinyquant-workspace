@@ -4,8 +4,8 @@ from collections import deque
 from collections.abc import Sequence
 from typing import Any
 
-from trading_nodes_base.factors.base import KlineTimingFactor
-from trading_nodes_base.factors.types import KlineBar, SignalIntent
+from trading_nodes_base.factors import KlineTimingFactor
+from trading_nodes_base.types import KlineBar, SignalIntent
 
 
 class _DailyTimingFactor(KlineTimingFactor):

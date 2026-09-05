@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections import deque
 from typing import Any
 
-from trading_nodes_base.factors.base import RiskKlineFactor
-from trading_nodes_base.factors.types import KlineBar, RiskSignal
+from trading_nodes_base.factors import RiskKlineFactor
+from trading_nodes_base.types import KlineBar, RiskSignal
 
 
 class AtrStopRiskFactor(RiskKlineFactor):

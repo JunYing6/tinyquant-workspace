@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from trading_nodes_base.minds.base import BaseMind
+from trading_nodes_base.minds import BaseMind
 
 
 class PerformanceWeightMind(BaseMind):

@@ -4,8 +4,8 @@ from collections import deque
 from typing import Any
 
 from trading_nodes.factors.risk.kline.atr_stop import AtrStopRiskFactor
-from trading_nodes_base.factors.types import KlineBar, RiskSignal
-from trading_nodes_base.methods.base import BaseRiskControl, RiskDecision
+from trading_nodes_base.types import KlineBar, RiskSignal
+from trading_nodes_base.methods import BaseRiskControl, RiskDecision
 
 
 class AtrRiskControl(BaseRiskControl):
