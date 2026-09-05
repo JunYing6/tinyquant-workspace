@@ -21,6 +21,9 @@ class MomentumSelectionFactor(FloatSelectionFactor):
     def _calculate_internal(self, data_cache: dict) -> pd.Series:
         values: dict[str, float] = {}
         for payload in data_cache.values():
+            records = getattr(payload, "records", None)
+            if records is not None:
+                payload = records
             rows = payload.to_dict("records") if hasattr(payload, "to_dict") else payload
             for row in rows or []:
                 if isinstance(row, dict):

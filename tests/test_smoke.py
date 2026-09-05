@@ -56,6 +56,9 @@ def test_gateway_assembles_and_runs_backtest() -> None:
 
 
 def test_selection_factors_accept_gateway_bar_records() -> None:
+    from datetime import timezone
+
+    from tools.data import Bar
     from tools.data import DataRequest
     from tools.data.memory import InMemoryGateway
     from importlib import import_module
@@ -67,7 +70,32 @@ def test_selection_factors_accept_gateway_bar_records() -> None:
         "trading_nodes.factors.selector.float.momentum"
     ).MomentumSelectionFactor
 
-    gateway = InMemoryGateway({"20240102": [{"code": "000001.SZ", "close": 10.0}]})
+    close = datetime(2024, 1, 2, 7, 0, tzinfo=timezone.utc)
+    bar = Bar(
+        schema_version="1",
+        event_id=None,
+        instrument_id="000001.SZ",
+        asset_type="equity",
+        effective_time=close,
+        event_time=close,
+        available_at=close,
+        trading_date=date(2024, 1, 2),
+        source="smoke",
+        quality="valid",
+        metadata={},
+        frequency="1d",
+        interval_start=close.replace(hour=1, minute=30),
+        interval_end=close,
+        open=10.0,
+        high=10.0,
+        low=10.0,
+        close=10.0,
+        volume=0.0,
+        turnover=0.0,
+        is_complete=True,
+        price_basis="raw",
+    )
+    gateway = InMemoryGateway(bars=[bar])
     request = DataRequest(
         dataset="market.bar",
         anchor=date(2024, 1, 2),

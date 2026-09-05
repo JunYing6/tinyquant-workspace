@@ -15,12 +15,12 @@ def main() -> int:
     end = data.dates_in_range("20240102", "99991231")[-1]
     strategies = [DualMaStrategy, BreakoutStrategy, MeanReversionStrategy, GoldenCrossStrategy, AtrStopStrategy, BreakoutRiskStrategy, MomentumPickStrategy, FilterPickStrategy, EmptyPositionStrategy]
     for strategy_type in strategies:
-        engine = FastBacktestEngine(strategy_type(), "20240102", end, data_gateway=data.gateway, mode="fast", progress_bar=False)
+        engine = FastBacktestEngine(strategy_type(), "20240102", end, data_gateway=data, mode="fast", progress_bar=False)
         engine.run()
         stats = engine.get_stats()
         print(f"{strategy_type.__name__}: final_equity={stats['final_equity']:.2f} trades={stats.get('trade_count', 0)}")
     stream = MultiStrategyStream()
-    engine = FastBacktestEngine(stream, "20240102", end, data_gateway=data.gateway, mode="fast", progress_bar=False)
+    engine = FastBacktestEngine(stream, "20240102", end, data_gateway=data, mode="fast", progress_bar=False)
     engine.run()
     print(f"stream weights: {stream.mind.current_weights}")
     return 0

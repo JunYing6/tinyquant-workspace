@@ -47,10 +47,10 @@ def build_gateway() -> DataGateway:
     return DataGateway(
         catalog=default_catalog(),
         bindings=[
-            (DataBinding("market.bar", historical.descriptor.name, 1, ("historical",)), historical),
-            (DataBinding("calendar.session", calendar.descriptor.name, 1, ("calendar",)), calendar),
+            (DataBinding("market.bar", historical.descriptor.name, 1, ("historical",)), historical.descriptor, historical),
+            (DataBinding("calendar.session", calendar.descriptor.name, 1, ("calendar",)), calendar.descriptor, calendar),
         ],
-        policy=DataPolicy(strict=False),
+        policy=DataPolicy(strict=False, timezone="UTC"),
     )
 
 
