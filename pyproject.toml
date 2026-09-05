@@ -17,6 +17,10 @@ dependencies = [
 dev = [
     "pytest>=7.4.0",
 ]
+workspace-data = [
+    "pandas>=2.0",
+    "pyarrow>=14.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
