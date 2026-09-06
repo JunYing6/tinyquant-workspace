@@ -1,4 +1,4 @@
-"""Migration mappings from legacy Tushare-layout parquet files to release datasets.
+"""Migration mappings from legacy Tushare-layout data files to release datasets.
 
 Every first-release dataset declared by ``tools.data.datasets.default_catalog``
 has exactly one :class:`MigrationMapping` entry here.  The mapping is the
@@ -6,6 +6,21 @@ machine-auditable contract between the physical ``E:/ProgramData`` layout and
 the standard catalog: column aliases, unit conversions, time semantics and the
 conservative point-in-time rule all live in this module so that conversion
 mistakes are visible and fixable in one place.
+
+Physical layout (consolidated 2026-09-06):
+
+- ``{root}/reference.duckdb``   one table per non-date-scoped master/reference
+  table (``trade_date``, ``stock_basic``, ``fina_indicator``, ...);
+- ``{root}/{year}/year.duckdb`` one table per date-scoped yearly table
+  (``kline`` incl. multi-day timeframes, ``daily_basic``, ``margin``, ...);
+- ``{root}/{year}/{MMDD}/stock|tradable|index.parquet``  per-day tick volumes
+  (write-once, vendor-native);
+- ``{root}/{year}/{MMDD}/kline.parquet``  that day's vendor daily-bar rows —
+  the raw layer the yearly ``kline`` table is packed from.
+
+A template's table is the ``#``-suffixed name (``{year}/year.duckdb#kline``).
+``physical_sources`` is where readers find the data; ``write_targets`` (when
+set) is where the downloader lands raw rows before packing.
 
 Unit rules (validated against real data on 2026-09-06):
 
@@ -32,10 +47,11 @@ DAY_CLOSE_PIT = "available_at = announcement date session close (15:00 Asia/Shan
 BAR_PIT = "market data: visible by event time; no announcement delay"
 TRADE_PIT = "available_at == event_time (feed time); ReplayClock as_of injects visibility"
 
-LEGACY_BAR = ("{year}/kline.parquet",)
-LEGACY_DAILY_BASIC = ("{year}/daily_basic.parquet",)
+LEGACY_BAR = ("{year}/year.duckdb#kline",)
+LEGACY_DAILY_BASIC = ("{year}/year.duckdb#daily_basic",)
 LEGACY_TICK_DAY = ("{year}/{MMDD}/stock.parquet", "{year}/{MMDD}/tradable.parquet")
 LEGACY_INDEX_TICK_DAY = ("{year}/{MMDD}/index.parquet",)
+LEGACY_BAR_DAY_WRITE = ("{year}/{MMDD}/kline.parquet",)
 
 
 @dataclass(frozen=True)
@@ -51,8 +67,9 @@ class MigrationMapping:
     time_conversion: str = ""
     pit_rule: str = ""
     missing_semantics: str = ""
-    source_revision_rule: str = "md5 over (path, size, mtime) of the source parquet files"
+    source_revision_rule: str = "md5 over (path, size, mtime) of the source data files"
     implemented: bool = False
+    write_targets: tuple[str, ...] = ()
 
 
 _INTERNAL_SAMPLE = MigrationMapping(
@@ -75,8 +92,9 @@ def _mapping(
     time_conversion: str = "",
     pit_rule: str = "",
     missing_semantics: str = "",
-    source_revision_rule: str = "md5 over (path, size, mtime) of the source parquet files",
+    source_revision_rule: str = "md5 over (path, size, mtime) of the source data files",
     implemented: bool = False,
+    write_targets: tuple[str, ...] = (),
 ) -> MigrationMapping:
     return MigrationMapping(
         dataset=dataset,
@@ -90,6 +108,7 @@ def _mapping(
         missing_semantics=missing_semantics,
         source_revision_rule=source_revision_rule,
         implemented=implemented,
+        write_targets=write_targets,
     )
 
 
@@ -102,7 +121,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         "calendar.session",
         "available",
         ("calendar/trade_cal",),
-        ("{root}/trade_date.parquet",),
+        ("{root}/reference.duckdb#trade_date",),
         aliases={"cal_date": "trading_date", "is_open": "is_open"},
         time_conversion="cal_date YYYYMMDD -> trading_date; single regular phase 09:30-15:00 Asia/Shanghai",
         pit_rule="calendar is not PIT-gated",
@@ -112,7 +131,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         "instrument.master",
         "available",
         ("stock/basic",),
-        ("{root}/stock_basic.parquet",),
+        ("{root}/reference.duckdb#stock_basic",),
         aliases={
             "ts_code": "instrument_id",
             "symbol": "symbol",
@@ -132,7 +151,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         "industry.membership",
         "available",
         ("sw/industry",),
-        ("{root}/sw_industry.parquet",),
+        ("{root}/reference.duckdb#sw_industry",),
         aliases={"index_code": "industry_id", "con_code": "instrument_id", "in_date": "valid_from", "out_date": "valid_to"},
         conversions={"is_new": "source-native flag, kept in metadata"},
         time_conversion="in_date/out_date YYYYMMDD -> validity window; source has no level column -> level='L1'",
@@ -156,8 +175,9 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         time_conversion="trade_date YYYYMMDD -> trading_date; interval 09:30-15:00 Asia/Shanghai; event_time=interval_end",
         pit_rule=BAR_PIT,
         missing_semantics="pct_chg/change keep sign semantics; NaN change on first bar",
-        source_revision_rule="md5 over (path, size, mtime) of the yearly kline files used",
+        source_revision_rule="md5 over (path, size, mtime) of the yearly duckdb files used",
         implemented=True,
+        write_targets=LEGACY_BAR_DAY_WRITE,
     ),
     _mapping(
         "market.daily_metric",
@@ -220,6 +240,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         time_conversion="kline rows with data_type=index -> index.bar view of market.bar",
         pit_rule=BAR_PIT,
         implemented=True,
+        write_targets=LEGACY_BAR_DAY_WRITE,
     ),
     _mapping(
         "fund.bar",
@@ -231,6 +252,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         time_conversion="kline rows with data_type=fund -> fund.bar view of market.bar",
         pit_rule=BAR_PIT,
         implemented=True,
+        write_targets=LEGACY_BAR_DAY_WRITE,
     ),
     _mapping(
         "market.daily_snapshot",
@@ -246,7 +268,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         "market.money_flow",
         "available",
         ("trade_data/moneyflow",),
-        ("{year}/moneyflow.parquet",),
+        ("{year}/year.duckdb#moneyflow",),
         aliases={"ts_code": "instrument_id", "trade_date": "trading_date"},
         conversions={"*_amount": "x1000 thousand-yuan -> yuan (Tushare moneyflow amounts)", "*_vol": "x100 lots -> shares"},
         time_conversion="trade_date YYYYMMDD -> trading_date",
@@ -256,7 +278,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         "market.margin",
         "available",
         ("idx=daily_margin",),
-        ("{year}/margin.parquet",),
+        ("{year}/year.duckdb#margin",),
         aliases={"trade_date": "trading_date"},
         conversions={"rzmre/rzye/rqye/rzrqye": "yuan, no conversion"},
         time_conversion="rows with level=summary -> market.margin",
@@ -266,7 +288,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         "market.margin_detail",
         "available",
         ("trade_data/margin_detail",),
-        ("{year}/margin.parquet",),
+        ("{year}/year.duckdb#margin",),
         aliases={"ts_code": "instrument_id", "trade_date": "trading_date"},
         time_conversion="rows with level=detail -> market.margin_detail",
         pit_rule=DAY_CLOSE_PIT,
@@ -275,7 +297,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         "market.breadth",
         "derived",
         ("trade_data/breadth",),
-        ("{year}/market_breadth.parquet",),
+        ("{year}/year.duckdb#market_breadth",),
         aliases={"trade_date": "trading_date"},
         conversions={"up_amount/down_amount/total_amount": "yuan, no conversion"},
         time_conversion="trade_date YYYYMMDD -> trading_date",
@@ -286,7 +308,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         "market.northbound",
         "available",
         ("trade_data/northbound",),
-        ("{year}/northbound_netbuy.parquet",),
+        ("{year}/year.duckdb#northbound_netbuy",),
         aliases={"ts_code": "instrument_id", "trade_date": "trading_date"},
         time_conversion="trade_date YYYYMMDD -> trading_date; source present for 2023 only",
         pit_rule=DAY_CLOSE_PIT,
@@ -296,7 +318,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         "market.northbound_summary",
         "available",
         ("trade_data/moneyflow_hsgt",),
-        ("{year}/moneyflow_hsgt.parquet",),
+        ("{year}/year.duckdb#moneyflow_hsgt",),
         aliases={"trade_date": "trading_date"},
         time_conversion="trade_date YYYYMMDD -> trading_date",
         pit_rule="publication time and trading date are separate in source",
@@ -305,7 +327,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         "market.shibor",
         "available",
         ("trade_data/shibor",),
-        ("{year}/shibor.parquet",),
+        ("{year}/year.duckdb#shibor",),
         aliases={"date": "observation_date"},
         conversions={"on/1w/2w/1m/3m/6m/9m/1y": "percentage_points, no conversion; wide table -> (observation_date, term, rate) long rows"},
         time_conversion="date YYYYMMDD -> observation_date",
@@ -315,7 +337,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         "market.yield_curve",
         "available",
         ("trade_data/yc_cb",),
-        ("{year}/yc_cb.parquet",),
+        ("{year}/year.duckdb#yc_cb",),
         aliases={"trade_date": "observation_date", "ts_code": "curve_id"},
         conversions={"yield": "percentage_points, no conversion"},
         time_conversion="curve_name/curve_type/curve_term are dimensions",
@@ -325,7 +347,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         "fund.portfolio",
         "available",
         ("fund/portfolio",),
-        ("{root}/fund_portfolio.parquet",),
+        ("{root}/reference.duckdb#fund_portfolio",),
         aliases={
             "fund_code": "fund_id",
             "ts_code": "instrument_id",
@@ -342,7 +364,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         "fundamental.indicator",
         "available",
         ("fina/indicator",),
-        ("{root}/fina_indicator.parquet",),
+        ("{root}/reference.duckdb#fina_indicator",),
         aliases={"ts_code": "instrument_id", "end_date": "report_date", "ann_date": "available_at"},
         time_conversion="end_date YYYYMMDD -> report_date (effective_time); ann_date YYYYMMDD -> available_at",
         pit_rule=DAY_CLOSE_PIT,
@@ -351,7 +373,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         "fundamental.income",
         "available",
         ("fina/income_report",),
-        ("{root}/income_report.parquet",),
+        ("{root}/reference.duckdb#income_report",),
         aliases={"ts_code": "instrument_id", "end_date": "report_date", "ann_date": "available_at", "f_ann_date": "available_at"},
         conversions={"*_income/revenue/total_*": "yuan, no conversion for this source"},
         time_conversion="end_date -> report_date; f_ann_date (fallback ann_date) -> available_at",
@@ -361,7 +383,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         "fundamental.balance",
         "available",
         ("fina/balance_report",),
-        ("{root}/balance_report.parquet",),
+        ("{root}/reference.duckdb#balance_report",),
         aliases={"ts_code": "instrument_id", "end_date": "report_date", "ann_date": "available_at", "f_ann_date": "available_at"},
         time_conversion="end_date -> report_date; f_ann_date (fallback ann_date) -> available_at",
         pit_rule=DAY_CLOSE_PIT,
@@ -370,7 +392,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         "fundamental.cashflow",
         "available",
         ("fina/cashflow_report",),
-        ("{root}/cashflow_report.parquet",),
+        ("{root}/reference.duckdb#cashflow_report",),
         aliases={"ts_code": "instrument_id", "end_date": "report_date", "ann_date": "available_at", "f_ann_date": "available_at"},
         time_conversion="end_date -> report_date; f_ann_date (fallback ann_date) -> available_at",
         pit_rule=DAY_CLOSE_PIT,
@@ -379,7 +401,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         "event.forecast",
         "available",
         ("event/forecast",),
-        ("{root}/forecast.parquet",),
+        ("{root}/reference.duckdb#forecast",),
         aliases={"ts_code": "instrument_id", "ann_date": "available_at", "end_date": "report_date"},
         time_conversion="ann_date -> available_at; end_date -> report_date",
         pit_rule=DAY_CLOSE_PIT,
@@ -388,7 +410,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         "event.holder_trade",
         "available",
         ("event/holdertrade",),
-        ("{root}/holdertrade.parquet",),
+        ("{root}/reference.duckdb#holdertrade",),
         aliases={"ts_code": "instrument_id", "ann_date": "available_at", "holder_name": "holder_name"},
         time_conversion="ann_date -> available_at; begin_date/close_date -> validity window",
         pit_rule=DAY_CLOSE_PIT,
@@ -397,7 +419,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         "event.top_holder",
         "available",
         ("event/top10_holder",),
-        ("{root}/top10_holder.parquet",),
+        ("{root}/reference.duckdb#top10_holder",),
         aliases={"ts_code": "instrument_id", "ann_date": "available_at", "end_date": "report_date", "holder_num": "holder_number"},
         time_conversion="ann_date -> available_at; end_date -> report_date",
         pit_rule=DAY_CLOSE_PIT,
@@ -406,7 +428,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         "event.holder_number",
         "available",
         ("event/stk_holdernumber",),
-        ("{year}/stk_holdernumber.parquet",),
+        ("{year}/year.duckdb#stk_holdernumber",),
         aliases={"ts_code": "instrument_id", "ann_date": "available_at", "end_date": "report_date", "holder_num": "holder_number"},
         time_conversion="ann_date -> available_at; end_date -> report_date",
         pit_rule=DAY_CLOSE_PIT,
@@ -415,7 +437,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         "event.block_trade",
         "available",
         ("event/block_trade",),
-        ("{year}/block_trade.parquet",),
+        ("{year}/year.duckdb#block_trade",),
         aliases={"ts_code": "instrument_id", "trade_date": "event_date"},
         conversions={"vol": "x100 lots -> shares", "amount": "x1000 thousand-yuan -> yuan"},
         time_conversion="trade_date -> event_date/effective_time",
@@ -425,7 +447,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         "event.pledge",
         "available",
         ("event/pledge_stat",),
-        ("{year}/pledge_stat.parquet",),
+        ("{year}/year.duckdb#pledge_stat",),
         aliases={"ts_code": "instrument_id", "end_date": "report_date", "trade_date": "available_at"},
         time_conversion="end_date -> report period; trade_date -> available_at",
         pit_rule=DAY_CLOSE_PIT,
@@ -434,7 +456,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         "macro.indicator",
         "available",
         ("macro/indicator",),
-        ("{root}/macro.parquet",),
+        ("{root}/reference.duckdb#macro",),
         aliases={"month": "observation_month", "indicator": "indicator", "value": "value"},
         time_conversion="month -> observation_month",
         pit_rule="publication time not present in source -> contract_only-grade PIT, use conservatively",
@@ -472,7 +494,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         "index.member",
         "available",
         ("index/member",),
-        ("按日成分文件",),
+        ("{year}/year.duckdb#index_member",),
         aliases={"index_id": "index_id", "ts_code": "instrument_id", "trade_date": "effective_date"},
         time_conversion="per-day constituent files -> (index_id, instrument_id, effective_date) rows",
         pit_rule=DAY_CLOSE_PIT,
@@ -482,7 +504,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         "corporate.action",
         "available",
         ("复权因子",),
-        ("{year}/kline.parquet adj_factor",),
+        ("{year}/year.duckdb#kline adj_factor",),
         time_conversion="adj_factor changes at ex-dividend dates; effective_time = ex-date",
         pit_rule="available_at = ex-date session close (conservative until a dedicated source exists)",
         missing_semantics="phase 2: no dedicated adapter yet; seeded from kline adj_factor later",

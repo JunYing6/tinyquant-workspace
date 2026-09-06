@@ -1,10 +1,10 @@
 """Intraday (stk_mins) bars fetcher (legacy scope ``trade_data/minute``).
 
 Calls the vendor ``stk_mins`` interface per instrument code and lands the raw
-rows at ``{year}/minute_{freq}.parquet`` (e.g. ``2024/minute_30min.parquet``).
-This layout has no MigrationMapping template (the release catalog serves
-minute bars from the per-day tick volume), so the scope registers a custom
-writer instead of the mapping-driven one.  Vendor fields stay raw.
+rows in ``{year}/year.duckdb`` table ``minute_{freq}`` (e.g. ``minute_30min``,
+deduplicated on ``ts_code``+``trade_time``).  The layout has no
+MigrationMapping template in the release catalog, so the scope registers a
+custom writer instead of the mapping-driven one.  Vendor fields stay raw.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from typing import Any
 
 import pandas as pd
 
-from data.downloader.base import RawVolumeWriter, retry_call
+from data.downloader.base import RawVolumeWriter, merge_duckdb_table, retry_call
 
 logger = logging.getLogger(__name__)
 
@@ -74,29 +74,17 @@ def write_minute(
     freq: str = "30min",
     **options: Any,
 ) -> list[Path]:
-    """Custom writer: ``{root}/{year}/minute_{freq}.parquet`` grouped by ``trade_time``."""
+    """Custom writer: ``{root}/{year}/year.duckdb`` table ``minute_{freq}`` by ``trade_time``."""
     if frame.empty:
         return []
-    filename = f"minute_{freq}.parquet"
     if "trade_time" not in frame.columns:
         raise ValueError(f"minute rows need a trade_time column, got {list(frame.columns)}")
-    digits = frame["trade_time"].astype(str).str.replace("-", "", regex=False).str[:8].str[:4]
+    frame = frame.copy()
+    frame["trade_time"] = frame["trade_time"].astype(str)
+    years = frame["trade_time"].str.replace("-", "", regex=False).str.slice(0, 4)
     written: list[Path] = []
-    for year, group in frame.groupby(digits, sort=True):
-        target = writer.root / str(year) / filename
-        target.parent.mkdir(parents=True, exist_ok=True)
-        merged = _merge(target, group)
-        merged.to_parquet(target, index=False)
-        written.append(target)
+    for year, group in frame.groupby(years, sort=True):
+        db_path = writer.root / str(year) / "year.duckdb"
+        merge_duckdb_table(db_path, f"minute_{freq}", group, ["ts_code", "trade_time"])
+        written.append(db_path)
     return written
-
-
-def _merge(target: Path, payload: pd.DataFrame) -> pd.DataFrame:
-    if not target.is_file():
-        return payload
-    existing = pd.read_parquet(target)
-    merged = pd.concat([existing, payload], ignore_index=True)
-    keys = ["ts_code", "trade_time"]
-    if all(k in merged.columns for k in keys):
-        merged = merged.drop_duplicates(subset=keys, keep="last")
-    return merged

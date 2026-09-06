@@ -1,10 +1,11 @@
 """Market breadth aggregator (legacy scope ``trade_data/breadth``).
 
 Derived scope, kept in the downloader only because the legacy volume stores it
-that way: it reads the already-downloaded ``{year}/kline.parquet`` from the raw
-volume and aggregates per-day up/down/total traded amount into
-``{year}/market_breadth.parquet``.  No vendor call happens here; the amounts
-are sums of the kline ``amount`` column in its vendor unit (no conversion).
+that way: it reads the already-downloaded daily bar files
+(``{year}/{MMDD}/kline.parquet``) from the raw volume and aggregates per-day
+up/down/total traded amount into the ``{year}/year.duckdb`` table
+``market_breadth``.  No vendor call happens here; the amounts are sums of the
+kline ``amount`` column in its vendor unit (no conversion).
 """
 
 from __future__ import annotations
@@ -26,10 +27,10 @@ def fetch_market_breadth(
     data_root: str | Path | None = None,
     **options: Any,
 ) -> pd.DataFrame:
-    """Aggregate market breadth from the raw kline volume (client unused)."""
+    """Aggregate market breadth from the raw daily bar files (client unused)."""
     if data_root is None:
         raise ValueError(
-            "trade_data/breadth reads the already-downloaded kline volume; "
+            "trade_data/breadth reads the already-downloaded bar volume; "
             "a data_root (RawVolumeWriter root) is required"
         )
     root = Path(data_root)
@@ -47,19 +48,19 @@ def fetch_market_breadth(
 
 
 def _aggregate_year(root: Path, year: int) -> pd.DataFrame:
-    path = root / str(year) / "kline.parquet"
-    if not path.is_file():
-        logger.warning("[breadth] %s 不存在，跳过 %d", path, year)
+    day_files = sorted((root / str(year)).glob("*/kline.parquet"))
+    if not day_files:
+        logger.warning("[breadth] %s 无每日 kline 文件，跳过 %d", root / str(year), year)
         return pd.DataFrame()
 
     try:
-        df = pd.read_parquet(path)
+        df = pd.concat((pd.read_parquet(p) for p in day_files), ignore_index=True)
     except Exception as e:
-        logger.error("[breadth] 读取 %s 失败: %s", path, e)
+        logger.error("[breadth] 读取 %s 失败: %s", year, e)
         return pd.DataFrame()
 
     if df.empty or "pct_chg" not in df.columns or "amount" not in df.columns:
-        logger.warning("[breadth] %s 字段缺失，跳过", path)
+        logger.warning("[breadth] %d 每日 kline 字段缺失，跳过", year)
         return pd.DataFrame()
 
     df["pct_chg"] = df["pct_chg"].fillna(0)

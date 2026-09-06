@@ -25,7 +25,8 @@ def build_workspace_gateway(
     policy: DataPolicy | None = None,
     **gateway_kwargs: Any,
 ) -> DataGateway:
-    """Assemble a :class:`DataGateway` over the workspace parquet volume.
+    """Assemble a :class:`DataGateway` over the consolidated workspace volume
+    (duckdb tables + per-day parquet).
 
     Phase-1 bindings: ``calendar.session``, ``instrument.master``,
     ``industry.membership``, ``market.bar``, ``index.bar``, ``fund.bar``,

@@ -7,8 +7,10 @@ The registry maps every legacy scope declared by
 
 Fetchers return vendor-native frames (no renaming, no unit conversion — the
 rules live in the ``MigrationMapping``); ``TushareDownloader.download`` lands
-them in the mapped physical layout via ``RawVolumeWriter``.  The client is
-always injected by the caller — nothing here reads tokens or credentials::
+them in the mapped physical layout via ``RawVolumeWriter`` (duckdb tables for
+yearly/global data, per-day parquet for daily bars and tick volumes).  The
+client is always injected by the caller — nothing here reads tokens or
+credentials::
 
     import tushare as ts
     client = ts.pro_api(token)          # caller's responsibility
@@ -28,7 +30,8 @@ from typing import Any, Callable, Mapping, Sequence
 
 import pandas as pd
 
-from data.downloader.base import RawVolumeWriter
+from data.downloader.base import RawVolumeWriter, dataset_for_scope
+from data.downloader.pack import pack_kline
 from data.downloader.scopes import (
     balance,
     block_trade,
@@ -365,9 +368,15 @@ class TushareDownloader:
         end: str,
         *,
         options: Mapping[str, Any] | None = None,
+        pack: bool = True,
         **write_kwargs: Any,
     ) -> list[Path]:
-        """Fetch ``scope`` and land it in the mapped layout; returns touched paths."""
+        """Fetch ``scope`` and land it in the mapped layout; returns touched paths.
+
+        Daily-bar scopes land per-day ``kline.parquet`` files and then repack
+        the year's ``year.duckdb#kline`` table (1d rows + derived 5d/10d
+        timeframes) unless ``pack=False``.
+        """
         spec = _require_spec(scope)
         payload = self.fetch(scope, start, end, **(options or {}))
         write_options = {
@@ -387,8 +396,13 @@ class TushareDownloader:
                 written.extend(
                     self._write_dataset(scope, spec, dataset, frame, **write_kwargs)
                 )
-            return written
-        return self._write_scope(scope, spec, payload, **write_kwargs)
+            paths = written
+        else:
+            paths = self._write_scope(scope, spec, payload, **write_kwargs)
+
+        if pack:
+            self._pack_kline_years(scope, paths)
+        return paths
 
     # -- internals ----------------------------------------------------------
 
@@ -429,6 +443,17 @@ class TushareDownloader:
         # minimal client without a calendar interface: fall back to naive
         # calendar-day iteration (the legacy skeleton behavior)
         return calendar.naive_calendar_days(start, end)
+
+    def _pack_kline_years(self, scope: str, paths: list[Path]) -> None:
+        """Repack the yearly kline table after daily-bar scopes touch day files."""
+        if dataset_for_scope(scope) not in ("market.bar", "index.bar", "fund.bar"):
+            return
+        # per-day files live at {year}/{MMDD}/kline.parquet
+        years = sorted(
+            {path.parent.parent.name for path in paths if path.name == "kline.parquet"}
+        )
+        for year in years:
+            pack_kline(self._writer.root, year)
 
 
 def _require_spec(scope: str) -> ScopeSpec:

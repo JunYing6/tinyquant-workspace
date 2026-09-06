@@ -1,12 +1,25 @@
-"""Downloader protocol and raw-volume writer for the workspace parquet layout.
+"""Downloader protocol and raw-volume writer for the workspace layout.
 
 The downloader is the *write* side of the data domain: it pulls raw vendor
 frames and lands them in the exact physical layout that
 ``data.adapters.workspace_data`` reads (the layout declared by each
-``MigrationMapping.physical_sources``).  Vendor fields stay vendor-native here;
-all semantic conversion happens in the adapters.
+``MigrationMapping``).  Vendor fields stay vendor-native here; all semantic
+conversion happens in the adapters.
 
-    vendor API -> Downloader -> raw parquet volume -> Adapter -> DataGateway
+    vendor API -> Downloader -> raw volume -> Adapter -> DataGateway
+
+The physical layout the writer produces:
+
+- ``{root}/reference.duckdb``      one table per non-date-scoped table
+- ``{root}/{year}/year.duckdb``    one table per date-scoped yearly table
+- ``{root}/{year}/{MMDD}/*.parquet``  per-day files (tick volumes, daily bars)
+
+Templates declare the target as ``{root}/reference.duckdb#trade_date`` or
+``{year}/year.duckdb#daily_basic`` (``#`` names the table); parquet templates
+keep the ``{year}``/``{MMDD}`` path forms.  Repeated writes merge into the
+existing table/file; ``dedup_keys`` selects the business key (keep="last", so
+re-downloads refresh existing rows), while the default deduplicates on the
+full row.
 
 This module also carries the shared plumbing every scope fetcher relies on:
 month iteration, exponential-backoff retries and offset pagination (all
@@ -17,10 +30,12 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Iterator, Optional, Protocol, Sequence, runtime_checkable
 
+import duckdb
 import pandas as pd
 
 from data.adapters.workspace_data.mappings import MAPPINGS_BY_DATASET
@@ -181,23 +196,118 @@ def report_periods(start_date: str, end_date: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# duckdb table IO
+# ---------------------------------------------------------------------------
+
+
+def duckdb_table_exists(con: duckdb.DuckDBPyConnection, table: str) -> bool:
+    row = con.execute(
+        "SELECT count(*) FROM information_schema.tables "
+        "WHERE table_schema = 'main' AND table_name = ?",
+        [table],
+    ).fetchone()
+    return bool(row and row[0])
+
+
+def read_duckdb_table(
+    db_path: str | Path,
+    table: str,
+    columns: Sequence[str] | None = None,
+) -> pd.DataFrame:
+    """Read one table from a duckdb file into a pandas frame."""
+    con = duckdb.connect(str(db_path), read_only=True)
+    try:
+        projection = ", ".join(f'"{c}"' for c in columns) if columns else "*"
+        return con.execute(f'SELECT {projection} FROM "{table}"').df()
+    finally:
+        con.close()
+
+
+def merge_duckdb_table(
+    db_path: str | Path,
+    table: str,
+    frame: pd.DataFrame,
+    dedup_keys: Sequence[str] | None = None,
+    dedupe: bool = True,
+) -> int:
+    """Merge ``frame`` into ``table`` (business-key dedupe, keep last); returns row count.
+
+    The whole table is rewritten atomically per call: read existing rows,
+    concat + dedupe, then ``CREATE OR REPLACE TABLE``.  The connection is
+    opened and closed per call so readers are only blocked for the rewrite.
+    """
+    if frame.empty:
+        return 0
+    db_path = Path(db_path)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    keys = list(dedup_keys) if dedup_keys else None
+
+    con = duckdb.connect(str(db_path))
+    try:
+        combined = frame
+        if duckdb_table_exists(con, table):
+            existing = con.execute(f'SELECT * FROM "{table}"').df()
+            missing = [k for k in (keys or []) if k not in existing.columns or k not in combined.columns]
+            if missing:
+                raise ValueError(
+                    f"dedup keys {missing} missing from existing table {table!r} or payload: {db_path}"
+                )
+            combined = pd.concat([existing, combined], ignore_index=True)
+        if dedupe:
+            combined = combined.drop_duplicates(subset=keys, keep="last")
+        con.register("_payload_df", combined)
+        con.execute(f'CREATE OR REPLACE TABLE "{table}" AS SELECT * FROM _payload_df')
+        con.unregister("_payload_df")
+        return len(combined)
+    finally:
+        con.close()
+
+
+@dataclass(frozen=True)
+class WriteTarget:
+    """A parsed physical write target."""
+
+    kind: str  # "parquet" | "duckdb"
+    scoped: str  # "year" | "root"
+    template: str  # original template, e.g. "{year}/year.duckdb#kline"
+    per_day: bool  # parquet only: {MMDD} path form
+    table: str | None  # duckdb only
+
+
+def parse_target(template: str) -> WriteTarget:
+    """Parse a write-template string into its kind/scope/table parts."""
+    if "#" in template:
+        path, table = template.split("#", 1)
+        return WriteTarget(kind="duckdb", scoped="root" if "{root}" in template else "year",
+                           template=template, per_day=False, table=table)
+    return WriteTarget(
+        kind="parquet",
+        scoped="root" if "{root}" in template else "year",
+        template=template,
+        per_day="{MMDD}" in template,
+        table=None,
+    )
+
+
+# ---------------------------------------------------------------------------
 # raw volume writer
 # ---------------------------------------------------------------------------
 
 
 class RawVolumeWriter:
-    """Lands raw frames into the legacy parquet layout under ``root``.
+    """Lands raw frames into the legacy workspace layout under ``root``.
 
-    Target paths are resolved from the dataset's ``MigrationMapping``, so the
-    writer and the readers stay aligned by construction:
+    Target paths/tables are resolved from the dataset's ``MigrationMapping``
+    (``write_targets`` first, then ``physical_sources``), so the writer and the
+    readers stay aligned by construction:
 
-    - ``{root}/{file}.parquet``     global snapshot tables (stock_basic, ...)
-    - ``{year}/kline.parquet``      rows grouped by year, merged + deduped
-    - ``{year}/{MMDD}/stock.parquet``  rows grouped by trading day
+    - ``{root}/reference.duckdb#trade_date``   global snapshot tables
+    - ``{year}/year.duckdb#daily_basic``       date-scoped yearly tables
+    - ``{year}/{MMDD}/kline.parquet``          rows grouped by trading day
 
-    Repeated writes merge into the existing file; ``dedup_keys`` selects the
-    business key (keep="last", so re-downloads refresh existing rows), while
-    the default deduplicates on the full row.
+    Repeated writes merge into the existing table/file; ``dedup_keys`` selects
+    the business key (keep="last", so re-downloads refresh existing rows),
+    while the default deduplicates on the full row.
     """
 
     def __init__(self, root: str | Path) -> None:
@@ -240,83 +350,120 @@ class RawVolumeWriter:
         mapping = MAPPINGS_BY_DATASET.get(dataset)
         if mapping is None:
             raise ValueError(f"no MigrationMapping for dataset {dataset!r}")
-        template = self._template(dataset, mapping.physical_sources)
+        template = self._write_template(dataset, mapping)
         if template is None:
             raise ValueError(
-                f"dataset {dataset!r} has no physical source template "
-                f"(physical_sources={mapping.physical_sources})"
+                f"dataset {dataset!r} has no physical write template "
+                f"(physical_sources={mapping.physical_sources}, write_targets={mapping.write_targets})"
             )
 
         if frame.empty:
             return []
 
         keys = list(dedup_keys) if dedup_keys else None
+        target = parse_target(template)
 
-        # global snapshot: one file at {root}/{file}, no date grouping
-        if "{year}" not in template:
-            target = self._root / template.split("{root}/", 1)[1]
-            target.parent.mkdir(parents=True, exist_ok=True)
-            merged = self._merge(target, frame, keys, dedupe)
-            merged.to_parquet(target, index=False)
-            return [target]
+        if target.scoped == "root":
+            return self._write_root_frame(target, frame, keys, dedupe)
 
         if date_column is None or date_column not in frame.columns:
             raise ValueError(
                 f"dataset {dataset!r} needs date column {date_column!r} for the "
                 f"yearly layout {template!r}; got columns {list(frame.columns)}"
             )
+        return self._write_year_frames(target, frame, date_column, keys, dedupe)
 
-        written: list[Path] = []
-        per_day = "{MMDD}" in template
-        suffix = template.split("{year}/", 1)[1]
-        date_text = frame[date_column].astype(str).str.replace(r"\D", "", regex=True)
-        group_key = date_text.str.slice(0, 8) if per_day else date_text.str.slice(0, 4)
-        for key, group in frame.groupby(group_key, sort=True):
-            if per_day:
-                target = self._root / key[:4] / key[4:8] / suffix.split("{MMDD}/", 1)[1]
-            else:
-                target = self._root / key / suffix
-            target.parent.mkdir(parents=True, exist_ok=True)
-            merged = self._merge(target, group, keys, dedupe)
-            merged.to_parquet(target, index=False)
-            written.append(target)
-        return written
+    # -- internals ----------------------------------------------------------
 
     @staticmethod
-    def _template(dataset: str, sources: tuple[str, ...]) -> str | None:
-        yearly = next((src for src in sources if "{year}" in src), None)
-        if yearly is not None:
-            return yearly
-        return next((src for src in sources if src.startswith("{root}/")), None)
+    def _write_template(dataset: str, mapping: Any) -> str | None:
+        candidates = tuple(mapping.write_targets) or tuple(mapping.physical_sources)
+        # per-day parquet first, then yearly, then root-scoped
+        for template in candidates:
+            if "{MMDD}" in template:
+                return template
+        for template in candidates:
+            if "{year}" in template:
+                return template
+        return next((src for src in candidates if src.startswith("{root}/")), None)
 
-    def _merge(
+    def _write_root_frame(
         self,
-        target: Path,
-        payload: pd.DataFrame,
-        dedup_keys: list[str] | None,
+        target: WriteTarget,
+        frame: pd.DataFrame,
+        keys: list[str] | None,
         dedupe: bool,
-    ) -> pd.DataFrame:
-        if target.is_file():
-            existing = pd.read_parquet(target)
-            missing = [k for k in (dedup_keys or []) if k not in existing.columns or k not in payload.columns]
-            if missing:
-                raise ValueError(
-                    f"dedup keys {missing} missing from existing file or payload: {target}"
-                )
-            payload = pd.concat([existing, payload], ignore_index=True)
-        if dedupe:
-            payload = payload.drop_duplicates(subset=dedup_keys, keep="last")
-        return payload
+    ) -> list[Path]:
+        if target.kind == "duckdb":
+            db_path = self._root / target.template.split("{root}/", 1)[1].split("#", 1)[0]
+            merge_duckdb_table(db_path, target.table, frame, keys, dedupe)
+            return [db_path]
+        target_path = self._root / target.template.split("{root}/", 1)[1]
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        merged = _merge_frame(target_path, frame, keys, dedupe)
+        merged.to_parquet(target_path, index=False)
+        return [target_path]
+
+    def _write_year_frames(
+        self,
+        target: WriteTarget,
+        frame: pd.DataFrame,
+        date_column: str,
+        keys: list[str] | None,
+        dedupe: bool,
+    ) -> list[Path]:
+        date_text = frame[date_column].astype(str).str.replace(r"\D", "", regex=True)
+        group_key = date_text.str.slice(0, 8) if target.per_day else date_text.str.slice(0, 4)
+        written: list[Path] = []
+        for key, group in frame.groupby(group_key, sort=True):
+            if target.kind == "duckdb":
+                db_path = self._root / key[:4] / target.template.split("{year}/", 1)[1].split("#", 1)[0]
+                merge_duckdb_table(db_path, target.table, group, keys, dedupe)
+                written.append(db_path)
+                continue
+            if target.per_day:
+                target_path = self._root / key[:4] / key[4:8] / target.template.split("{year}/", 1)[1].split("{MMDD}/", 1)[1]
+            else:
+                target_path = self._root / key / target.template.split("{year}/", 1)[1]
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            merged = _merge_frame(target_path, group, keys, dedupe)
+            merged.to_parquet(target_path, index=False)
+            written.append(target_path)
+        return written
+
+
+def _merge_frame(
+    target: Path,
+    payload: pd.DataFrame,
+    dedup_keys: list[str] | None,
+    dedupe: bool,
+) -> pd.DataFrame:
+    if target.is_file():
+        existing = pd.read_parquet(target)
+        missing = [k for k in (dedup_keys or []) if k not in existing.columns or k not in payload.columns]
+        if missing:
+            raise ValueError(
+                f"dedup keys {missing} missing from existing file or payload: {target}"
+            )
+        payload = pd.concat([existing, payload], ignore_index=True)
+    if dedupe:
+        payload = payload.drop_duplicates(subset=dedup_keys, keep="last")
+    return payload
 
 
 __all__ = [
     "Downloader",
     "RawVolumeWriter",
+    "WriteTarget",
     "dataset_for_scope",
+    "duckdb_table_exists",
     "fetch_with_pagination",
     "get_month_range",
     "iter_months",
+    "merge_duckdb_table",
+    "parse_target",
     "quarter_end_dates",
+    "read_duckdb_table",
     "report_periods",
     "retry_call",
 ]

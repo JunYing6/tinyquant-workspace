@@ -1,11 +1,10 @@
 """Index membership (weights) fetcher (legacy scope ``index/member``).
 
 Calls the vendor ``index_weight`` interface per index code and lands each
-trading day's constituent rows at ``{year}/{MMDD}/index_member.parquet``
-(``index_code``/``con_code``/``trade_date``/``weight``).  The
-``index.member`` mapping declares this per-day layout as a description rather
-than a path template, so the scope registers a custom writer that reproduces
-the legacy per-day directory layout exactly.
+trading day's constituent rows in ``{year}/year.duckdb`` table
+``index_member`` (``index_code``/``con_code``/``trade_date``/``weight``,
+deduplicated on ``index_code``+``con_code``+``trade_date``).  The legacy
+per-day ``index_member.parquet`` files are consolidated into the yearly table.
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ from typing import Any
 
 import pandas as pd
 
-from data.downloader.base import RawVolumeWriter, retry_call
+from data.downloader.base import RawVolumeWriter, merge_duckdb_table, retry_call
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +65,10 @@ def fetch_index_member(
     if not all_rows:
         logger.warning("[index_member] 无数据")
         return pd.DataFrame()
-    return pd.concat(all_rows, ignore_index=True)
+    result = pd.concat(all_rows, ignore_index=True)
+    if "trade_date" in result.columns:
+        result["trade_date"] = result["trade_date"].astype(str)
+    return result
 
 
 def write_index_member(
@@ -74,29 +76,17 @@ def write_index_member(
     frame: pd.DataFrame,
     **options: Any,
 ) -> list[Path]:
-    """Custom writer: one ``{root}/{year}/{MMDD}/index_member.parquet`` per day."""
+    """Custom writer: ``{root}/{year}/year.duckdb`` table ``index_member`` by ``trade_date``."""
     if frame.empty:
         return []
     if "trade_date" not in frame.columns:
         raise ValueError(f"index_member rows need trade_date, got {list(frame.columns)}")
-
+    frame = frame.copy()
+    frame["trade_date"] = frame["trade_date"].astype(str)
+    years = frame["trade_date"].str.slice(0, 4)
     written: list[Path] = []
-    for trade_date, group in frame.groupby("trade_date"):
-        date_str = str(trade_date)
-        target = writer.root / date_str[:4] / date_str[4:8] / "index_member.parquet"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        merged = _merge(target, group)
-        merged.to_parquet(target, index=False)
-        written.append(target)
+    for year, group in frame.groupby(years, sort=True):
+        db_path = writer.root / str(year) / "year.duckdb"
+        merge_duckdb_table(db_path, "index_member", group, ["index_code", "con_code", "trade_date"])
+        written.append(db_path)
     return written
-
-
-def _merge(target: Path, payload: pd.DataFrame) -> pd.DataFrame:
-    if not target.is_file():
-        return payload
-    existing = pd.read_parquet(target)
-    merged = pd.concat([existing, payload], ignore_index=True)
-    keys = ["index_code", "con_code"]
-    if all(k in merged.columns for k in keys):
-        merged = merged.drop_duplicates(subset=keys, keep="last")
-    return merged

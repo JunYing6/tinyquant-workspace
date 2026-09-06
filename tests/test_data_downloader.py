@@ -3,9 +3,13 @@
 Every registered legacy scope is exercised against an injected fake vendor
 client (no network, no credentials): the test asserts that
 
-1. the touched files land at the exact ``MigrationMapping`` layout paths,
-2. the written column sets match the legacy on-disk layout,
-3. repeated downloads merge + deduplicate (business key, keep last).
+1. the touched files/tables land at the exact ``MigrationMapping`` layout
+   (duckdb tables for yearly/global data, per-day parquet for daily bars and
+   tick volumes),
+2. the written column sets match the legacy layout,
+3. repeated downloads merge + deduplicate (business key, keep last),
+4. the packed ``kline`` table carries the 5d/10d derived timeframes,
+5. the legacy-volume migration converts, validates and deletes correctly.
 
 The tick CSV ingestion additionally asserts the exact 28-column schema of
 ``{year}/{MMDD}/stock.parquet`` — including dtypes — and, when the real USB
@@ -26,11 +30,23 @@ from data.downloader import (
     NON_VENDOR_SCOPES,
     TushareDownloader,
     list_scopes,
+    migrate_volume,
+    read_duckdb_table,
     uncovered_legacy_scopes,
 )
 
 TRADING_DAYS = ["20240102", "20240103"]
 INSTRUMENT = "000001.SZ"
+
+REFERENCE_DB = "reference.duckdb"
+YEAR_DB = "2024/year.duckdb"
+
+
+def read_target(root: Path, rel: str, table: str | None) -> pd.DataFrame:
+    """Read a layout target: duckdb table when a table name is given, else parquet."""
+    if table is not None:
+        return read_duckdb_table(root / rel, table)
+    return pl.read_parquet(root / rel).to_pandas()
 
 
 # ---------------------------------------------------------------------------
@@ -614,18 +630,6 @@ def downloader(client, root) -> TushareDownloader:
     return TushareDownloader(client=client, root=root, rate_limit_sleep=0.0)
 
 
-@pytest.fixture()
-def write_kline_volume(downloader, root):
-    """Pre-populate the volume with the daily kline/daily_basic split (for derived scopes)."""
-
-    def _write():
-        paths = downloader.download("trade_data/daily", "20240101", "20240108")
-        assert paths, "kline volume should be written"
-        return paths
-
-    return _write
-
-
 # ---------------------------------------------------------------------------
 # registry coverage
 # ---------------------------------------------------------------------------
@@ -668,48 +672,48 @@ def test_fetcher_never_reads_credentials(downloader, client):
 # scope-by-scope layout contract (fake client, offline)
 # ---------------------------------------------------------------------------
 
+# (scope, options, {(relative target, table-or-None): expected columns})
 SCOPE_CASES = [
-    # (scope, options, {(relative, expected columns)})
     pytest.param(
         "calendar/trade_cal",
         {},
-        {"trade_date.parquet": ["cal_date", "is_open"]},
+        {(REFERENCE_DB, "trade_date"): ["cal_date", "is_open"]},
         id="calendar/trade_cal",
     ),
     pytest.param(
         "stock/basic",
         {},
-        {"stock_basic.parquet": None},  # columns == requested vendor fields
+        {(REFERENCE_DB, "stock_basic"): None},  # columns == requested vendor fields
         id="stock/basic",
     ),
     pytest.param(
         "sw/industry",
         {},
-        {"sw_industry.parquet": ["index_code", "con_code", "in_date", "out_date", "is_new"]},
+        {(REFERENCE_DB, "sw_industry"): ["index_code", "con_code", "in_date", "out_date", "is_new"]},
         id="sw/industry",
     ),
     pytest.param(
         "trade_data/moneyflow",
         {},
-        {"2024/moneyflow.parquet": None},
+        {(YEAR_DB, "moneyflow"): None},
         id="trade_data/moneyflow",
     ),
     pytest.param(
         "idx=daily_margin",
         {},
-        {"2024/margin.parquet": ["trade_date", "rzmre", "rzye", "rqye", "rzrqye", "level", "ts_code"]},
+        {(YEAR_DB, "margin"): ["trade_date", "rzmre", "rzye", "rqye", "rzrqye", "level", "ts_code"]},
         id="idx=daily_margin",
     ),
     pytest.param(
         "trade_data/margin_detail",
         {},
-        {"2024/margin.parquet": ["trade_date", "ts_code", "rzymye", "rzmre", "rzche", "rqmcl", "rqchl", "rqye", "rzrqye", "level"]},
+        {(YEAR_DB, "margin"): ["trade_date", "ts_code", "rzymye", "rzmre", "rzche", "rqmcl", "rqchl", "rqye", "rzrqye", "level"]},
         id="trade_data/margin_detail",
     ),
     pytest.param(
         "trade_data/northbound",
         {"akshare": None},  # replaced with the fake below
-        {"2024/northbound_netbuy.parquet": [
+        {(YEAR_DB, "northbound_netbuy"): [
             "trade_date", "net_buy_shares", "net_buy", "hold_shares",
             "hold_market_cap", "close", "pct_chg", "ts_code",
         ]},
@@ -718,115 +722,115 @@ SCOPE_CASES = [
     pytest.param(
         "trade_data/moneyflow_hsgt",
         {},
-        {"2024/moneyflow_hsgt.parquet": ["trade_date", "ggt_ss", "ggt_sz", "hgt", "sgt", "north_money", "south_money"]},
+        {(YEAR_DB, "moneyflow_hsgt"): ["trade_date", "ggt_ss", "ggt_sz", "hgt", "sgt", "north_money", "south_money"]},
         id="trade_data/moneyflow_hsgt",
     ),
     pytest.param(
         "trade_data/shibor",
         {},
-        {"2024/shibor.parquet": ["date", "on", "1w", "2w", "1m", "3m", "6m", "9m", "1y"]},
+        {(YEAR_DB, "shibor"): ["date", "on", "1w", "2w", "1m", "3m", "6m", "9m", "1y"]},
         id="trade_data/shibor",
     ),
     pytest.param(
         "trade_data/yc_cb",
         {},
-        {"2024/yc_cb.parquet": ["trade_date", "ts_code", "curve_name", "curve_type", "curve_term", "yield"]},
+        {(YEAR_DB, "yc_cb"): ["trade_date", "ts_code", "curve_name", "curve_type", "curve_term", "yield"]},
         id="trade_data/yc_cb",
     ),
     pytest.param(
         "index/daily",
         {},
-        {"2024/kline.parquet": None},
+        {("2024/0102/kline.parquet", None): None, (YEAR_DB, "kline"): None},
         id="index/daily",
     ),
     pytest.param(
         "fund/daily",
         {},
-        {"2024/kline.parquet": None},
+        {("2024/0102/kline.parquet", None): None, (YEAR_DB, "kline"): None},
         id="fund/daily",
     ),
     pytest.param(
         "index/member",
         {},
-        {"2024/0102/index_member.parquet": ["index_code", "con_code", "trade_date", "weight"]},
+        {(YEAR_DB, "index_member"): ["index_code", "con_code", "trade_date", "weight"]},
         id="index/member",
     ),
     pytest.param(
         "fina/indicator",
         {},
-        {"fina_indicator.parquet": None},
+        {(REFERENCE_DB, "fina_indicator"): None},
         id="fina/indicator",
     ),
     pytest.param(
         "fina/income_report",
         {},
-        {"income_report.parquet": None},
+        {(REFERENCE_DB, "income_report"): None},
         id="fina/income_report",
     ),
     pytest.param(
         "fina/balance_report",
         {},
-        {"balance_report.parquet": None},
+        {(REFERENCE_DB, "balance_report"): None},
         id="fina/balance_report",
     ),
     pytest.param(
         "fina/cashflow_report",
         {},
-        {"cashflow_report.parquet": None},
+        {(REFERENCE_DB, "cashflow_report"): None},
         id="fina/cashflow_report",
     ),
     pytest.param(
         "fund/portfolio",
         {},
-        {"fund_portfolio.parquet": ["fund_code", "ann_date", "end_date", "ts_code", "mkv", "amount", "stk_mkv_ratio", "stk_float_ratio"]},
+        {(REFERENCE_DB, "fund_portfolio"): ["fund_code", "ann_date", "end_date", "ts_code", "mkv", "amount", "stk_mkv_ratio", "stk_float_ratio"]},
         id="fund/portfolio",
     ),
     pytest.param(
         "event/forecast",
         {},
-        {"forecast.parquet": ["ts_code", "ann_date", "end_date", "type", "p_change_min", "p_change_max", "net_profit_min", "net_profit_max"]},
+        {(REFERENCE_DB, "forecast"): ["ts_code", "ann_date", "end_date", "type", "p_change_min", "p_change_max", "net_profit_min", "net_profit_max"]},
         id="event/forecast",
     ),
     pytest.param(
         "event/holdertrade",
         {},
-        {"holdertrade.parquet": None},
+        {(REFERENCE_DB, "holdertrade"): None},
         id="event/holdertrade",
     ),
     pytest.param(
         "event/top10_holder",
         {},
-        {"top10_holder.parquet": ["ts_code", "ann_date", "end_date", "holder_name", "hold_amount", "hold_ratio"]},
+        {(REFERENCE_DB, "top10_holder"): ["ts_code", "ann_date", "end_date", "holder_name", "hold_amount", "hold_ratio"]},
         id="event/top10_holder",
     ),
     pytest.param(
         "event/stk_holdernumber",
         {},
-        {"2024/stk_holdernumber.parquet": ["ts_code", "ann_date", "end_date", "holder_num"]},
+        {(YEAR_DB, "stk_holdernumber"): ["ts_code", "ann_date", "end_date", "holder_num"]},
         id="event/stk_holdernumber",
     ),
     pytest.param(
         "event/block_trade",
         {},
-        {"2024/block_trade.parquet": ["ts_code", "trade_date", "price", "vol", "amount", "buyer", "seller"]},
+        {(YEAR_DB, "block_trade"): ["ts_code", "trade_date", "price", "vol", "amount", "buyer", "seller"]},
         id="event/block_trade",
     ),
     pytest.param(
         "event/pledge_stat",
         {},
-        {"2024/pledge_stat.parquet": ["ts_code", "end_date", "pledge_count", "unrest_pledge", "rest_pledge", "total_share", "pledge_ratio", "trade_date"]},
+        {(YEAR_DB, "pledge_stat"): ["ts_code", "end_date", "pledge_count", "unrest_pledge", "rest_pledge", "total_share", "pledge_ratio", "trade_date"]},
         id="event/pledge_stat",
     ),
     pytest.param(
         "macro/indicator",
         {"epu_fetcher": None},  # replaced with the fake below
-        {"macro.parquet": ["month", "indicator", "value"]},
+        {(REFERENCE_DB, "macro"): ["month", "indicator", "value"]},
         id="macro/indicator",
     ),
     pytest.param(
         "fina/consensus",
         {"akshare": None},  # replaced with the fake below
-        {"2024/consensus_forecast.parquet": ["ts_code", "year", "eps_mean", "np_mean"]},
+        {(YEAR_DB, "consensus_forecast"): ["ts_code", "year", "eps_mean", "np_mean"]},
         id="fina/consensus",
     ),
 ]
@@ -857,14 +861,17 @@ def test_scope_download_lands_mapping_layout(downloader, client, root, scope, op
     paths = downloader.download(scope, START, END, options=options)
 
     assert paths, f"scope {scope} wrote nothing"
-    for rel, columns in expected.items():
+    returned = {str(p.relative_to(root)) for p in paths}
+    for (rel, table), columns in expected.items():
         target = root / rel
         assert target.is_file(), f"scope {scope} missing {rel}"
-        assert str(target.relative_to(root)) in {str(p.relative_to(root)) for p in paths}
-        frame = pl.read_parquet(target)
-        assert frame.height > 0
+        if table is None:
+            # parquet targets are written directly and must be in the returned paths
+            assert str(target.relative_to(root)) in returned, f"scope {scope}: {rel} not returned"
+        frame = read_target(root, rel, table)
+        assert len(frame) > 0
         if columns is not None:
-            assert list(frame.columns) == columns, f"scope {scope}: {rel} columns"
+            assert list(frame.columns) == columns, f"scope {scope}: {rel}#{table} columns"
 
 
 @pytest.mark.parametrize("scope,options,expected", SCOPE_CASES)
@@ -874,49 +881,68 @@ def test_scope_download_is_idempotent(downloader, root, scope, options, expected
 
     downloader.download(scope, START, END, options=options)
     counts_before = {
-        rel: pl.read_parquet(root / rel).height for rel in expected
+        (rel, table): len(read_target(root, rel, table)) for rel, table in expected
     }
     downloader.download(scope, START, END, options=options)
-    for rel, count in counts_before.items():
-        assert pl.read_parquet(root / rel).height == count, f"scope {scope}: {rel} duplicated rows"
+    for target_key, count in counts_before.items():
+        rel, table = target_key
+        assert len(read_target(root, rel, table)) == count, f"scope {scope}: {rel}#{table} duplicated rows"
 
 
 # ---------------------------------------------------------------------------
-# multi-file / multi-dataset scopes
+# multi-dataset scopes and the kline pack
 # ---------------------------------------------------------------------------
 
 
-def test_daily_scope_writes_kline_and_daily_basic_split(downloader, root):
+def test_daily_scope_writes_day_files_and_packed_tables(downloader, root):
     paths = downloader.download("trade_data/daily", START, END)
 
+    # per-day bar files are the raw layer; the daily_metric table shares the year db
     assert {p.relative_to(root) for p in paths} == {
-        Path("2024") / "kline.parquet",
-        Path("2024") / "daily_basic.parquet",
+        Path("2024") / "0102" / "kline.parquet",
+        Path("2024") / "0103" / "kline.parquet",
+        Path(YEAR_DB),
     }
-    kline = pl.read_parquet(root / "2024" / "kline.parquet")
-    assert list(kline.columns) == [
+    day_frame = pl.read_parquet(root / "2024" / "0102" / "kline.parquet").to_pandas()
+    assert list(day_frame.columns) == [
         "ts_code", "trade_date", "open", "high", "low", "close", "pre_close",
         "pct_chg", "vol", "amount", "adj_factor", "name", "data_type", "timeframe",
         "change",
     ]
-    assert kline.height == len(TRADING_DAYS)
-    assert set(kline["data_type"]) == {"stock"}
-    assert set(kline["timeframe"]) == {"1d"}
+    assert set(day_frame["data_type"]) == {"stock"}
 
-    basic = pl.read_parquet(root / "2024" / "daily_basic.parquet")
+    # packed yearly kline table (auto-pack) + daily metric table
+    kline = read_duckdb_table(root / YEAR_DB, "kline")
+    assert len(kline[kline["timeframe"] == "1d"]) == len(TRADING_DAYS)
+    basic = read_duckdb_table(root / YEAR_DB, "daily_basic")
     assert list(basic.columns) == [
         "ts_code", "trade_date", "is_st", "is_suspended", "turnover_rate_f",
         "volume_ratio", "pe_ttm", "pb", "ps_ttm", "dv_ttm", "total_share",
         "float_share", "free_share", "total_mv", "circ_mv", "up_limit",
         "down_limit", "limit",
     ]
-    assert basic.height == len(TRADING_DAYS)
+    assert len(basic) == len(TRADING_DAYS)
     assert basic["limit"][0] == "U"
+
+
+def test_kline_pack_derives_multi_day_timeframes(downloader, root):
+    downloader.download("trade_data/daily", START, END)
+    kline = read_duckdb_table(root / YEAR_DB, "kline")
+
+    blocks = kline[kline["timeframe"] == "5d"]
+    assert len(blocks) == 1  # 2 trading days fit in one 5-day block
+    block = blocks.iloc[0]
+    assert block["trade_date"] == "20240103"  # block ends on the last day
+    assert block["open"] == 9.39 and block["close"] == 9.30
+    assert block["vol"] == 200000.0 and block["amount"] == 186000.0
+    assert block["pre_close"] is None or pd.isna(block["pre_close"])  # no earlier block
+
+    ten_day = kline[kline["timeframe"] == "10d"]
+    assert len(ten_day) == 1
 
 
 def test_daily_repeated_download_merges_and_refreshes(downloader, root):
     downloader.download("trade_data/daily", START, END)
-    kline_path = root / "2024" / "kline.parquet"
 
     # second run with a changed close must refresh the row, not duplicate it
     original = downloader._client.daily
@@ -929,54 +955,58 @@ def test_daily_repeated_download_merges_and_refreshes(downloader, root):
     downloader._client.daily = shifted
     downloader.download("trade_data/daily", START, END)
 
-    kline = pl.read_parquet(kline_path)
-    assert kline.height == len(TRADING_DAYS)
-    assert set(kline["close"]) == {9.99}
+    day_frame = pl.read_parquet(root / "2024" / "0102" / "kline.parquet").to_pandas()
+    assert len(day_frame) == 1  # one day per file
+    assert set(day_frame["close"]) == {9.99}
+    kline = read_duckdb_table(root / YEAR_DB, "kline")
+    base = kline[kline["timeframe"] == "1d"]
+    assert len(base) == len(TRADING_DAYS)
+    assert set(base["close"]) == {9.99}
 
 
-def test_margin_summary_and_detail_share_the_year_file(downloader, root):
+def test_margin_summary_and_detail_share_the_year_table(downloader, root):
     downloader.download("idx=daily_margin", START, END)
     downloader.download("trade_data/margin_detail", START, END)
 
-    margin = pl.read_parquet(root / "2024" / "margin.parquet")
+    margin = read_duckdb_table(root / YEAR_DB, "margin")
     assert set(margin["level"]) == {"summary", "detail"}
-    assert margin.height == len(TRADING_DAYS) * 2
-    summary = margin.filter(pl.col("level") == "summary")
-    assert summary["ts_code"].null_count() == len(TRADING_DAYS)
+    assert len(margin) == len(TRADING_DAYS) * 2
+    summary = margin[margin["level"] == "summary"]
+    assert summary["ts_code"].isna().sum() == len(TRADING_DAYS)
 
 
-def test_index_and_fund_bars_share_the_kline_file(downloader, root):
+def test_index_and_fund_bars_share_the_kline_layout(downloader, root):
     downloader.download("trade_data/daily", START, END)
     downloader.download("index/daily", START, END)
     downloader.download("fund/daily", START, END)
 
-    kline = pl.read_parquet(root / "2024" / "kline.parquet")
-    assert set(kline["data_type"]) == {"stock", "index", "fund"}
-    # dedup keeps one row per (ts_code, trade_date, data_type, timeframe)
-    assert kline.height == len(kline.unique(subset=["ts_code", "trade_date", "data_type", "timeframe"]))
+    day_frame = pl.read_parquet(root / "2024" / "0102" / "kline.parquet").to_pandas()
+    assert set(day_frame["data_type"]) == {"stock", "index", "fund"}
+    kline = read_duckdb_table(root / YEAR_DB, "kline")
+    base = kline[kline["timeframe"] == "1d"]
+    assert len(base) == len(base.drop_duplicates(subset=["ts_code", "trade_date", "data_type", "timeframe"]))
 
 
-def test_breadth_is_aggregated_from_the_kline_volume(downloader, root):
-    write_kline_volume_fixture = downloader.download("trade_data/daily", START, END)
-    assert write_kline_volume_fixture
+def test_breadth_is_aggregated_from_the_day_files(downloader, root):
+    assert downloader.download("trade_data/daily", START, END)
 
     paths = downloader.download("trade_data/breadth", START, END)
-    assert {p.relative_to(root) for p in paths} == {Path("2024") / "market_breadth.parquet"}
+    assert {p.relative_to(root) for p in paths} == {Path(YEAR_DB)}
 
-    breadth = pl.read_parquet(root / "2024" / "market_breadth.parquet")
+    breadth = read_duckdb_table(root / YEAR_DB, "market_breadth")
     assert list(breadth.columns) == ["trade_date", "up_amount", "down_amount", "total_amount"]
-    assert breadth.height == len(TRADING_DAYS)
+    assert len(breadth) == len(TRADING_DAYS)
 
 
-def test_minute_scope_writes_freq_file(downloader, root):
+def test_minute_scope_writes_freq_table(downloader, root):
     paths = downloader.download(
         "trade_data/minute",
         START,
         END,
         options={"codes": [INSTRUMENT], "freq": "30min"},
     )
-    assert [p.relative_to(root) for p in paths] == [Path("2024") / "minute_30min.parquet"]
-    frame = pl.read_parquet(root / "2024" / "minute_30min.parquet")
+    assert [p.relative_to(root) for p in paths] == [Path(YEAR_DB)]
+    frame = read_duckdb_table(root / YEAR_DB, "minute_30min")
     assert {"ts_code", "trade_time"} <= set(frame.columns)
 
 
@@ -987,26 +1017,24 @@ def test_minute_scope_requires_codes(downloader):
 
 def test_global_snapshot_merge_dedupe(downloader, root):
     downloader.download("calendar/trade_cal", START, END)
-    first = pl.read_parquet(root / "trade_date.parquet")
+    first = read_duckdb_table(root / REFERENCE_DB, "trade_date")
     downloader.download("calendar/trade_cal", START, END)
-    second = pl.read_parquet(root / "trade_date.parquet")
-    assert second.height == first.height  # dedup on cal_date
+    second = read_duckdb_table(root / REFERENCE_DB, "trade_date")
+    assert len(second) == len(first)  # dedup on cal_date
 
 
 def test_forecast_scope_keeps_legacy_row_filter(downloader, root):
     downloader.download("event/forecast", START, END)
-    forecast = pl.read_parquet(root / "forecast.parquet")
+    forecast = read_duckdb_table(root / REFERENCE_DB, "forecast")
     assert set(forecast["type"]) == {"预减", "扭亏"}  # "略增" filtered like the legacy volume
 
 
 def test_trade_cal_scope_feeds_downstream_calendar(downloader, root):
     """After downloading the calendar, calendar-dependent scopes can resolve trade dates."""
-    downloader.download("calendar/trade_cal", "20240101", "20240108")
+    downloader.download("calendar/trade_cal", START, END)
 
     def provider(start, end):
-        import polars as pl_
-
-        table = pl_.read_parquet(root / "trade_date.parquet").to_pandas()
+        table = read_duckdb_table(root / REFERENCE_DB, "trade_date")
         table["cal_date"] = table["cal_date"].astype(str)
         rows = table[(table["is_open"] == "1") & (table["cal_date"] >= start) & (table["cal_date"] <= end)]
         return sorted(rows["cal_date"].tolist())
@@ -1018,7 +1046,7 @@ def test_trade_cal_scope_feeds_downstream_calendar(downloader, root):
         trade_dates_provider=provider,
     )
     paths = local.download("event/block_trade", START, END)
-    assert [p.relative_to(root) for p in paths] == [Path("2024") / "block_trade.parquet"]
+    assert [p.relative_to(root) for p in paths] == [Path(YEAR_DB)]
 
 
 # ---------------------------------------------------------------------------
@@ -1176,3 +1204,122 @@ def test_tick_stock_schema_isomorphic_with_real_volume(tmp_path):
     produced = pl.read_parquet_schema(root / "2024" / "0102" / "stock.parquet")
     real = pl.read_parquet_schema(REAL_VOLUME / "2024" / "0102" / "stock.parquet")
     assert list(produced.items()) == list(real.items())
+
+
+# ---------------------------------------------------------------------------
+# legacy-volume migration
+# ---------------------------------------------------------------------------
+
+
+def _build_legacy_volume(root: Path) -> None:
+    """A miniature pre-consolidation volume: global/yearly parquet + tick day."""
+    def write(frame: pd.DataFrame, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        frame.to_parquet(path, index=False)
+
+    write(
+        pd.DataFrame({"cal_date": ["20240101", "20240102"], "is_open": ["0", "1"]}),
+        root / "trade_date.parquet",
+    )
+    write(
+        pd.DataFrame({"ts_code": [INSTRUMENT], "name": ["平安银行"]}),
+        root / "stock_basic.parquet",
+    )
+    kline = pd.DataFrame(
+        {
+            "ts_code": [INSTRUMENT, INSTRUMENT],
+            "trade_date": ["20240102", "20240103"],
+            "open": [9.39, 9.21],
+            "high": [9.42, 9.4],
+            "low": [9.21, 9.0],
+            "close": [9.21, 9.1],
+            "pre_close": [9.39, 9.21],
+            "pct_chg": [-1.9, -1.2],
+            "vol": [11583.66, 9000.0],
+            "amount": [107574.22, 90000.0],
+            "adj_factor": [116.7, 116.7],
+            "name": ["平安银行", "平安银行"],
+            "data_type": ["stock", "stock"],
+            "timeframe": ["1d", "1d"],
+            "change": [None, None],
+        }
+    )
+    write(kline, root / "2024" / "kline.parquet")
+    write(
+        pd.DataFrame({"ts_code": [INSTRUMENT], "trade_date": ["20240102"], "pe_ttm": [3.68]}),
+        root / "2024" / "daily_basic.parquet",
+    )
+    # a tick day keeps its directory; index_member migrates into the year db
+    write(
+        pd.DataFrame({"index_code": ["399006.SZ"], "con_code": [INSTRUMENT],
+                      "trade_date": ["20240102"], "weight": [0.85]}),
+        root / "2024" / "0102" / "index_member.parquet",
+    )
+    write(
+        pd.DataFrame({"time": ["09:30:00"], "pr": [9.3], "vol": [100], "total_vol": [100],
+                      "amount": [93000], "bs": ["B"], "code": [INSTRUMENT], "flag": [1]}),
+        root / "2024" / "0102" / "stock.parquet",
+    )
+    # a year without daily directories: bars stay db-only after migration
+    write(
+        pd.DataFrame(
+            {
+                "ts_code": ["600000.SH"],
+                "trade_date": ["20230630"],
+                "open": [8.0], "high": [8.4], "low": [7.9], "close": [8.2],
+                "pre_close": [8.0], "pct_chg": [2.5], "vol": [8000.0],
+                "amount": [80000.0], "adj_factor": [100.0], "name": ["浦发银行"],
+                "data_type": ["stock"], "timeframe": ["1d"], "change": [None],
+            }
+        ),
+        root / "2023" / "kline.parquet",
+    )
+
+
+def test_migration_converts_validates_and_deletes(tmp_path):
+    root = tmp_path / "ProgramData"
+    _build_legacy_volume(root)
+
+    # dry run: convert + validate, keep every legacy parquet
+    report = migrate_volume(root, apply=False)
+    assert report.ok(), report.failures
+    assert (root / "reference.duckdb").is_file()
+    assert (root / "2024" / "year.duckdb").is_file()
+    assert (root / "2024" / "kline.parquet").is_file()  # untouched on dry run
+    assert (root / "2024" / "0102" / "stock.parquet").is_file()  # tick volume untouched
+
+    trade_date = read_duckdb_table(root / REFERENCE_DB, "trade_date")
+    assert list(trade_date["cal_date"]) == ["20240101", "20240102"]
+
+    kline = read_duckdb_table(root / "2024" / "year.duckdb", "kline")
+    base = kline[kline["timeframe"] == "1d"]
+    assert len(base) == 2  # both days packed from the yearly file
+    assert set(kline["timeframe"]) == {"1d", "5d", "10d"}
+    # the tick day gains its daily kline mirror
+    assert (root / "2024" / "0102" / "kline.parquet").is_file()
+
+    member = read_duckdb_table(root / "2024" / "year.duckdb", "index_member")
+    assert len(member) == 1 and member["trade_date"][0] == "20240102"
+
+    kline_2023 = read_duckdb_table(root / "2023" / "year.duckdb", "kline")
+    assert len(kline_2023[kline_2023["timeframe"] == "1d"]) == 1
+
+    # apply: legacy parquet files are deleted, tick volume and dbs survive
+    report = migrate_volume(root, apply=True)
+    assert report.ok(), report.failures
+    assert not (root / "trade_date.parquet").exists()
+    assert not (root / "stock_basic.parquet").exists()
+    assert not (root / "2024" / "kline.parquet").exists()
+    assert not (root / "2024" / "daily_basic.parquet").exists()
+    assert not (root / "2024" / "0102" / "index_member.parquet").exists()
+    assert not (root / "2023" / "kline.parquet").exists()
+    # tick parquet survives
+    assert (root / "2024" / "0102" / "stock.parquet").is_file()
+    # the daily directory keeps exactly the tick volume + the daily kline mirror
+    assert sorted(p.name for p in (root / "2024" / "0102").iterdir()) == [
+        "kline.parquet", "stock.parquet",
+    ]
+
+    # idempotent: re-migrating finds nothing left to convert
+    rerun = migrate_volume(root, apply=True)
+    assert rerun.ok(), rerun.failures

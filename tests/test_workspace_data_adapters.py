@@ -17,6 +17,7 @@ from tools.data import (
     default_catalog,
 )
 
+from data.downloader import RawVolumeWriter, pack_kline
 from data.adapters.workspace_data import (
     MIGRATION_MAPPINGS,
     WorkspaceBarAdapter,
@@ -39,149 +40,6 @@ def _write(frame: pd.DataFrame, path) -> None:
     frame.to_parquet(path, index=False)
 
 
-@pytest.fixture()
-def volume(tmp_path):
-    root = tmp_path / "ProgramData"
-    # calendar
-    _write(
-        pd.DataFrame(
-            {
-                "cal_date": ["20240101", "20240102", "20240103"],
-                "is_open": [0, 1, 1],
-            }
-        ),
-        root / "trade_date.parquet",
-    )
-    # instruments
-    _write(
-        pd.DataFrame(
-            {
-                "ts_code": ["000001.SZ", "600000.SH"],
-                "symbol": ["000001", "600000"],
-                "name": ["平安银行", "浦发银行"],
-                "area": ["深圳", "上海"],
-                "industry": ["银行", "银行"],
-                "fullname": ["a", "b"],
-                "market": ["主板", "主板"],
-                "exchange": ["SZSE", "SSE"],
-                "list_status": ["L", "L"],
-                "list_date": ["19910403", "19991110"],
-                "delist_date": [None, None],
-                "is_hs": ["S", "N"],
-            }
-        ),
-        root / "stock_basic.parquet",
-    )
-    # industry membership
-    _write(
-        pd.DataFrame(
-            {
-                "index_code": ["801780.SI", "801780.SI"],
-                "con_code": ["000001.SZ", "600000.SH"],
-                "in_date": ["20140101", "20140101"],
-                "out_date": [None, None],
-                "is_new": ["Y", "Y"],
-            }
-        ),
-        root / "sw_industry.parquet",
-    )
-    # yearly kline: vol in lots, amount in thousand-yuan, stock+index+fund rows
-    kline = pd.DataFrame(
-        {
-            "ts_code": ["000001.SZ", "000001.SZ", "600000.SH", "000001.SH", "510300.SH"],
-            "trade_date": ["20240102", "20240103", "20240102", "20240102", "20240102"],
-            "open": [9.39, 9.21, 8.0, 2974.94, 3.5],
-            "high": [9.42, 9.4, 8.4, 2983.0, 3.6],
-            "low": [9.21, 9.0, 7.9, 2962.0, 3.4],
-            "close": [9.21, 9.1, 8.2, 2962.28, 3.55],
-            "pre_close": [9.39, 9.21, 8.0, 2974.94, 3.5],
-            "pct_chg": [-1.9, -1.2, 2.5, -0.43, 1.4],
-            "vol": [11583.66, 9000.0, 8000.0, 3041417.93, 100.0],
-            "amount": [107574.22, 90000.0, 80000.0, 345950729.2, 900.0],
-            "adj_factor": [116.7, 116.7, 100.0, 1.0, 1.0],
-            "name": ["平安银行", "平安银行", "浦发银行", "上证指数", "300ETF"],
-            "data_type": ["stock", "stock", "stock", "index", "fund"],
-            "timeframe": ["1d"] * 5,
-            "change": [None] * 5,
-        }
-    )
-    _write(kline, root / "2024" / "kline.parquet")
-    # yearly daily_basic: market values in ten-thousand units
-    _write(
-        pd.DataFrame(
-            {
-                "ts_code": ["000001.SZ", "000001.SZ", "600000.SH"],
-                "trade_date": ["20240102", "20240103", "20240102"],
-                "is_st": [0, 0, 0],
-                "is_suspended": [0, 0, 0],
-                "turnover_rate_f": [1.42, 1.1, 0.9],
-                "volume_ratio": [1.41, 1.0, 0.8],
-                "pe_ttm": [3.68, 3.6, 4.2],
-                "pb": [0.45, 0.44, 0.4],
-                "ps_ttm": [1.05, 1.0, 1.1],
-                "dv_ttm": [3.09, 3.1, 5.0],
-                "total_share": [1940592.0, 1940592.0, 1472619.0],
-                "float_share": [1940555.0, 1940555.0, 1472619.0],
-                "free_share": [816042.75, 816042.75, 800000.0],
-                "total_mv": [17872850.0, 17660000.0, 12075500.0],
-                "circ_mv": [17872510.0, 17659000.0, 12075000.0],
-                "up_limit": [10.33, 10.13, 8.8],
-                "down_limit": [8.45, 8.29, 7.2],
-                "limit": [None, None, None],
-            }
-        ),
-        root / "2024" / "daily_basic.parquet",
-    )
-    # one tick day: three rows for 000001.SZ (trade+quote, quote-only, trade+quote)
-    _write(
-        pd.DataFrame(
-            {
-                "time": ["09:30:00", "09:30:03", "09:30:06"],
-                "pr": [9.30, 0.0, 9.31],
-                "vol": [1000, 0, 500],
-                "total_vol": [1000, 1000, 1500],
-                "amount": [930000.0, 0.0, 465500.0],
-                "b1p": [9.29, 9.28, 9.30],
-                "b1v": [200, 210, 220],
-                "b2p": [9.28, 9.27, 9.29],
-                "b2v": [300, 310, 320],
-                "b3p": [0.0, 0.0, 0.0],
-                "b3v": [0, 0, 0],
-                "b4p": [0.0, 0.0, 0.0],
-                "b4v": [0, 0, 0],
-                "b5p": [0.0, 0.0, 0.0],
-                "b5v": [0, 0, 0],
-                "s1p": [9.31, 9.29, 9.32],
-                "s1v": [400, 410, 420],
-                "s2p": [9.32, 9.30, 9.33],
-                "s2v": [500, 510, 520],
-                "s3p": [0.0, 0.0, 0.0],
-                "s3v": [0, 0, 0],
-                "s4p": [0.0, 0.0, 0.0],
-                "s4v": [0, 0, 0],
-                "s5p": [0.0, 0.0, 0.0],
-                "s5v": [0, 0, 0],
-                "bs": ["B", "S", "B"],
-                "code": ["000001.SZ", "000001.SZ", "000001.SZ"],
-                "flag": [0, 0, 0],
-            }
-        ),
-        root / "2024" / "0102" / "stock.parquet",
-    )
-    _write(
-        pd.DataFrame(
-            {
-                "code": ["000001.SH"],
-                "time": ["09:30:00"],
-                "pr": [2962.28],
-                "vol": [100.0],
-                "total_vol": [100.0],
-                "amount": [29622800.0],
-            }
-        ),
-        root / "2024" / "0102" / "index.parquet",
-    )
-    return root
 
 
 def _day_bounds(day: str) -> tuple[datetime, datetime]:
@@ -473,7 +331,7 @@ def test_snapshot_composite_joins_bar_and_metric(volume) -> None:
 def _volume_mounted() -> bool:
     from pathlib import Path
 
-    return (Path(ROOT) / "trade_date.parquet").is_file()
+    return (Path(ROOT) / "reference.duckdb").is_file()
 
 
 requires_volume = pytest.mark.skipif(not _volume_mounted(), reason="workspace volume not mounted")
@@ -563,7 +421,7 @@ def test_raw_volume_writer_lands_legacy_layout(tmp_path) -> None:
         }
     )
     written = writer.write_scope("trade_data/daily", frame)
-    assert written == [tmp_path / "2024" / "kline.parquet"]
+    assert written == [tmp_path / "2024" / "0102" / "kline.parquet"]
     stored = pd.read_parquet(written[0])
     assert len(stored) == 1
 
@@ -642,38 +500,162 @@ def test_derived_indicator_adapter_computes_ma(tmp_path) -> None:
 
 
 def _make_volume(root) -> None:
-    """Same synthetic layout as the ``volume`` fixture (for non-fixture tests)."""
+    """Synthetic consolidated-layout volume built through the downloader writer.
+
+    Exercising ``RawVolumeWriter`` + ``pack_kline`` keeps the fixture and the
+    real download path aligned by construction.  The tick day files are raw
+    vendor-layout parquet (written by ``tick_import`` in production) and are
+    written directly.
+    """
     import pathlib
 
     root = pathlib.Path(root)
-    _write(
+    writer = RawVolumeWriter(root)
+
+    # calendar
+    writer.write_dataset(
+        "calendar.session",
         pd.DataFrame(
             {
                 "cal_date": ["20240101", "20240102", "20240103"],
-                "is_open": [0, 1, 1],
+                "is_open": ["0", "1", "1"],
             }
         ),
-        root / "trade_date.parquet",
+    )
+    # instruments
+    writer.write_dataset(
+        "instrument.master",
+        pd.DataFrame(
+            {
+                "ts_code": ["000001.SZ", "600000.SH"],
+                "symbol": ["000001", "600000"],
+                "name": ["平安银行", "浦发银行"],
+                "area": ["深圳", "上海"],
+                "industry": ["银行", "银行"],
+                "fullname": ["a", "b"],
+                "market": ["主板", "主板"],
+                "exchange": ["SZSE", "SSE"],
+                "list_status": ["L", "L"],
+                "list_date": ["19910403", "19991110"],
+                "delist_date": [None, None],
+                "is_hs": ["S", "N"],
+            }
+        ),
+    )
+    # industry membership
+    writer.write_dataset(
+        "industry.membership",
+        pd.DataFrame(
+            {
+                "index_code": ["801780.SI", "801780.SI"],
+                "con_code": ["000001.SZ", "600000.SH"],
+                "in_date": ["20140101", "20140101"],
+                "out_date": [None, None],
+                "is_new": ["Y", "Y"],
+            }
+        ),
+    )
+    # daily bars: vol in lots, amount in thousand-yuan, stock+index+fund rows;
+    # land the per-day raw files, then pack the yearly kline table
+    kline = pd.DataFrame(
+        {
+            "ts_code": ["000001.SZ", "000001.SZ", "600000.SH", "000001.SH", "510300.SH"],
+            "trade_date": ["20240102", "20240103", "20240102", "20240102", "20240102"],
+            "open": [9.39, 9.21, 8.0, 2974.94, 3.5],
+            "high": [9.42, 9.4, 8.4, 2983.0, 3.6],
+            "low": [9.21, 9.0, 7.9, 2962.0, 3.4],
+            "close": [9.21, 9.1, 8.2, 2962.28, 3.55],
+            "pre_close": [9.39, 9.21, 8.0, 2974.94, 3.5],
+            "pct_chg": [-1.9, -1.2, 2.5, -0.43, 1.4],
+            "vol": [11583.66, 9000.0, 8000.0, 3041417.93, 100.0],
+            "amount": [107574.22, 90000.0, 80000.0, 345950729.2, 900.0],
+            "adj_factor": [116.7, 116.7, 100.0, 1.0, 1.0],
+            "name": ["平安银行", "平安银行", "浦发银行", "上证指数", "300ETF"],
+            "data_type": ["stock", "stock", "stock", "index", "fund"],
+            "timeframe": ["1d"] * 5,
+            "change": [None] * 5,
+        }
+    )
+    writer.write_dataset("market.bar", kline)
+    pack_kline(root, "2024")
+    # yearly daily metrics: market values in ten-thousand units
+    writer.write_dataset(
+        "market.daily_metric",
+        pd.DataFrame(
+            {
+                "ts_code": ["000001.SZ", "000001.SZ", "600000.SH"],
+                "trade_date": ["20240102", "20240103", "20240102"],
+                "is_st": [0, 0, 0],
+                "is_suspended": [0, 0, 0],
+                "turnover_rate_f": [1.42, 1.1, 0.9],
+                "volume_ratio": [1.41, 1.0, 0.8],
+                "pe_ttm": [3.68, 3.6, 4.2],
+                "pb": [0.45, 0.44, 0.4],
+                "ps_ttm": [1.05, 1.0, 1.1],
+                "dv_ttm": [3.09, 3.1, 5.0],
+                "total_share": [1940592.0, 1940592.0, 1472619.0],
+                "float_share": [1940555.0, 1940555.0, 1472619.0],
+                "free_share": [816042.75, 816042.75, 800000.0],
+                "total_mv": [17872850.0, 17660000.0, 12075500.0],
+                "circ_mv": [17872510.0, 17659000.0, 12075000.0],
+                "up_limit": [10.33, 10.13, 8.8],
+                "down_limit": [8.45, 8.29, 7.2],
+                "limit": [None, None, None],
+            }
+        ),
+    )
+    # one tick day: three rows for 000001.SZ (trade+quote, quote-only, trade+quote)
+    _write(
+        pd.DataFrame(
+            {
+                "time": ["09:30:00", "09:30:03", "09:30:06"],
+                "pr": [9.30, 0.0, 9.31],
+                "vol": [1000, 0, 500],
+                "total_vol": [1000, 1000, 1500],
+                "amount": [930000.0, 0.0, 465500.0],
+                "b1p": [9.29, 9.28, 9.30],
+                "b1v": [200, 210, 220],
+                "b2p": [9.28, 9.27, 9.29],
+                "b2v": [300, 310, 320],
+                "b3p": [0.0, 0.0, 0.0],
+                "b3v": [0, 0, 0],
+                "b4p": [0.0, 0.0, 0.0],
+                "b4v": [0, 0, 0],
+                "b5p": [0.0, 0.0, 0.0],
+                "b5v": [0, 0, 0],
+                "s1p": [9.31, 9.29, 9.32],
+                "s1v": [400, 410, 420],
+                "s2p": [9.32, 9.30, 9.33],
+                "s2v": [500, 510, 520],
+                "s3p": [0.0, 0.0, 0.0],
+                "s3v": [0, 0, 0],
+                "s4p": [0.0, 0.0, 0.0],
+                "s4v": [0, 0, 0],
+                "s5p": [0.0, 0.0, 0.0],
+                "s5v": [0, 0, 0],
+                "bs": ["B", "S", "B"],
+                "code": ["000001.SZ", "000001.SZ", "000001.SZ"],
+                "flag": [0, 0, 0],
+            }
+        ),
+        root / "2024" / "0102" / "stock.parquet",
     )
     _write(
         pd.DataFrame(
             {
-                "ts_code": ["000001.SZ", "000001.SZ"],
-                "trade_date": ["20240102", "20240103"],
-                "open": [9.39, 9.21],
-                "high": [9.42, 9.4],
-                "low": [9.21, 9.0],
-                "close": [9.21, 9.1],
-                "pre_close": [9.39, 9.21],
-                "pct_chg": [-1.9, -1.2],
-                "vol": [11583.66, 9000.0],
-                "amount": [107574.22, 90000.0],
-                "adj_factor": [116.7, 116.7],
-                "name": ["平安银行", "平安银行"],
-                "data_type": ["stock", "stock"],
-                "timeframe": ["1d", "1d"],
-                "change": [None, None],
+                "code": ["000001.SH"],
+                "time": ["09:30:00"],
+                "pr": [2962.28],
+                "vol": [100.0],
+                "total_vol": [100.0],
+                "amount": [29622800.0],
             }
         ),
-        root / "2024" / "kline.parquet",
+        root / "2024" / "0102" / "index.parquet",
     )
+    return root
+
+
+@pytest.fixture()
+def volume(tmp_path):
+    return _make_volume(tmp_path / "ProgramData")

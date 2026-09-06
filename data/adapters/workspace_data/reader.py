@@ -1,4 +1,10 @@
-"""Shared parquet IO and market-calendar helpers for the workspace adapters."""
+"""Shared data IO and market-calendar helpers for the workspace adapters.
+
+Sources are the consolidated volume layout: duckdb tables for yearly/global
+data (``{year}/year.duckdb#kline``, ``{root}/reference.duckdb#stock_basic``,
+...) and per-day parquet for the tick volumes.  All conversions follow
+``adapters/workspace_data/mappings.py``.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +12,7 @@ import hashlib
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
+import duckdb
 import pandas as pd
 
 CST = timezone(timedelta(hours=8))  # China Standard Time, no DST
@@ -15,6 +22,9 @@ SESSION_CLOSE = time(15, 0)
 
 ASSET_TYPE_MAP = {"stock": "equity", "index": "index", "fund": "fund"}
 STATUS_MAP = {"L": "listed", "D": "delisted", "P": "paused"}
+
+REFERENCE_DB = "reference.duckdb"
+YEAR_DB = "year.duckdb"
 
 
 def session_bounds(trading_date: date) -> tuple[datetime, datetime]:
@@ -72,9 +82,51 @@ def resolve_year_files(root: Path, filename: str, start: date | None, end: date 
     return files
 
 
+def resolve_year_dbs(root: Path, start: date | None, end: date | None) -> list[Path]:
+    """Resolve ``{root}/{year}/year.duckdb`` files covering the requested range."""
+    return resolve_year_files(root, YEAR_DB, start, end)
+
+
 def read_frame(path: Path, columns: list[str] | None = None) -> pd.DataFrame:
     """Read one parquet file into a pandas frame (pyarrow backend)."""
     return pd.read_parquet(path, columns=columns)
+
+
+def read_table(
+    db_path: Path,
+    table: str,
+    columns: list[str] | None = None,
+    where: str | None = None,
+    params: list | None = None,
+) -> pd.DataFrame:
+    """Read one table from a duckdb file (read-only, connection per call)."""
+    if not db_path.is_file():
+        raise FileNotFoundError(f"duckdb data file not found: {db_path}")
+    projection = ", ".join(f'"{c}"' for c in columns) if columns else "*"
+    sql = f'SELECT {projection} FROM "{table}"'
+    if where:
+        sql += f" WHERE {where}"
+    con = duckdb.connect(str(db_path), read_only=True)
+    try:
+        return con.execute(sql, params or []).df()
+    finally:
+        con.close()
+
+
+def table_exists(db_path: Path, table: str) -> bool:
+    """Whether ``table`` exists in the duckdb file at ``db_path``."""
+    if not db_path.is_file():
+        return False
+    con = duckdb.connect(str(db_path), read_only=True)
+    try:
+        row = con.execute(
+            "SELECT count(*) FROM information_schema.tables "
+            "WHERE table_schema = 'main' AND table_name = ?",
+            [table],
+        ).fetchone()
+        return bool(row and row[0])
+    finally:
+        con.close()
 
 
 def source_revision(paths: list[Path]) -> str:
@@ -115,15 +167,20 @@ __all__ = [
     "ASSET_TYPE_MAP",
     "CST",
     "MARKET",
+    "REFERENCE_DB",
     "SESSION_CLOSE",
     "SESSION_OPEN",
     "STATUS_MAP",
+    "YEAR_DB",
     "announcement_close",
     "date_range_days",
     "parse_yyyymmdd",
     "read_frame",
+    "read_table",
+    "resolve_year_dbs",
     "resolve_year_files",
     "session_bounds",
     "source_revision",
+    "table_exists",
     "to_yyyymmdd",
 ]

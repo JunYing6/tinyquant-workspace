@@ -1,12 +1,12 @@
 """Consensus profit-forecast fetcher (legacy scope ``fina/consensus``).
 
 Non-Tushare scope: the legacy workspace sourced THS consensus forecasts via
-akshare (``stock_profit_forecast_ths``), walked per stock, and wrote yearly
-``{year}/consensus_forecast.parquet`` files (``ts_code``/``year``/
-``eps_mean``/``np_mean``).  The release mapping marks ``fina/consensus``
-contract-only (no physical source on the workspace volume — the adapters
-reject requests), so this scope registers a custom writer for the legacy
-yearly layout and exists to keep the download capability.
+akshare (``stock_profit_forecast_ths``), walked per stock, and stored yearly
+rows (``ts_code``/``year``/``eps_mean``/``np_mean``) in the yearly duckdb
+table ``consensus_forecast``.  The release mapping marks ``fina/consensus``
+contract-only (no physical source the adapters serve — requests fail), so
+this scope registers a custom writer for the yearly table and exists to keep
+the download capability.
 
 The akshare module is injectable via the ``akshare`` option (any object with
 ``stock_profit_forecast_ths``); without it the fetcher falls back to
@@ -23,7 +23,7 @@ from typing import Any
 
 import pandas as pd
 
-from data.downloader.base import RawVolumeWriter
+from data.downloader.base import RawVolumeWriter, merge_duckdb_table
 
 logger = logging.getLogger(__name__)
 
@@ -107,25 +107,17 @@ def write_consensus(
     frame: pd.DataFrame,
     **options: Any,
 ) -> list[Path]:
-    """Custom writer: one ``{root}/{year}/consensus_forecast.parquet`` per year."""
+    """Custom writer: ``{root}/{year}/year.duckdb`` table ``consensus_forecast``."""
     if frame.empty:
         return []
+    frame = frame.copy()
+    frame["year"] = frame["year"].astype(int)
     written: list[Path] = []
     for year, group in frame.groupby("year"):
-        target = writer.root / str(int(year)) / "consensus_forecast.parquet"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        merged = _merge(target, group)
-        merged.to_parquet(target, index=False)
-        written.append(target)
+        db_path = writer.root / str(int(year)) / "year.duckdb"
+        merge_duckdb_table(db_path, "consensus_forecast", group, ["ts_code"])
+        written.append(db_path)
     return written
-
-
-def _merge(target: Path, payload: pd.DataFrame) -> pd.DataFrame:
-    if not target.is_file():
-        return payload
-    existing = pd.read_parquet(target)
-    merged = pd.concat([existing, payload], ignore_index=True)
-    return merged.drop_duplicates(subset=["ts_code"], keep="last")
 
 
 def _code_to_ts(code: str) -> str:

@@ -1,15 +1,15 @@
-"""Historical and calendar adapters over the legacy workspace parquet layout.
+"""Historical and calendar adapters over the consolidated workspace volume.
 
 ``WorkspaceParquetAdapter`` serves the phase-1 table/bar datasets:
 
-- ``market.bar`` / ``index.bar`` / ``fund.bar`` (yearly ``kline.parquet``,
-  dispatched by the ``data_type`` column)
-- ``market.daily_metric`` (yearly ``daily_basic.parquet``)
-- ``instrument.master`` (``stock_basic.parquet``)
-- ``industry.membership`` (``sw_industry.parquet``)
+- ``market.bar`` / ``index.bar`` / ``fund.bar`` (yearly ``year.duckdb#kline``,
+  dispatched by the ``data_type`` column; 1d and multi-day timeframes)
+- ``market.daily_metric`` (``year.duckdb#daily_basic``)
+- ``instrument.master`` (``reference.duckdb#stock_basic``)
+- ``industry.membership`` (``reference.duckdb#sw_industry``)
 
 ``WorkspaceCalendarAdapter`` serves ``calendar.session`` from
-``trade_date.parquet``.
+``reference.duckdb#trade_date``.
 
 All conversions follow ``adapters/workspace_data/mappings.py``.
 """
@@ -40,11 +40,12 @@ from data.adapters.workspace_data.reader import (
     ASSET_TYPE_MAP,
     CST,
     MARKET,
+    REFERENCE_DB,
     STATUS_MAP,
     announcement_close,
     parse_yyyymmdd,
-    read_frame,
-    resolve_year_files,
+    read_table,
+    resolve_year_dbs,
     session_bounds,
     source_revision,
     to_yyyymmdd,
@@ -121,7 +122,7 @@ def _batch(
 
 
 class WorkspaceCalendarAdapter:
-    """Serves ``calendar.session`` from ``trade_date.parquet``."""
+    """Serves ``calendar.session`` from ``reference.duckdb#trade_date``."""
 
     def __init__(self, data_root: str | Path, market: str = MARKET) -> None:
         self._root = Path(data_root)
@@ -138,7 +139,7 @@ class WorkspaceCalendarAdapter:
         )
 
     def sessions(self, request: CalendarRequest) -> CalendarBatch:
-        frame = read_frame(self._root / "trade_date.parquet")
+        frame = read_table(self._root / REFERENCE_DB, "trade_date")
         open_days = {
             parse_yyyymmdd(v)
             for v, flag in zip(frame["cal_date"], frame["is_open"])
@@ -224,7 +225,7 @@ class WorkspaceBarAdapter:
 
     def _open_days(self) -> list[date]:
         if self._open_days_cache is None:
-            frame = read_frame(self._root / "trade_date.parquet")
+            frame = read_table(self._root / REFERENCE_DB, "trade_date")
             days = {
                 parse_yyyymmdd(v)
                 for v, flag in zip(frame["cal_date"], frame["is_open"])
@@ -239,7 +240,7 @@ class WorkspaceBarAdapter:
         view = request.dataset
         wanted_asset = {"market.bar": None, "index.bar": "index", "fund.bar": "fund"}[view]
         start_d, end_d = self._resolve_range(request)
-        files = resolve_year_files(self._root, "kline.parquet", start_d, end_d)
+        files = resolve_year_dbs(self._root, start_d, end_d)
         revision = source_revision(files) if files else "wp-empty"
         if not files:
             return _batch(ADAPTER_NAME, revision, request, view, ())
@@ -247,8 +248,11 @@ class WorkspaceBarAdapter:
         dropped = 0
         start_s = to_yyyymmdd(start_d) if start_d is not None else None
         end_s = to_yyyymmdd(end_d) if end_d is not None else None
-        for path in files:
-            frame = read_frame(path).rename(columns=_BAR_ALIASES)
+        for db_path in files:
+            frame = read_table(db_path, "kline").rename(columns=_BAR_ALIASES)
+            # the packed kline table carries multi-day timeframes (5d/10d);
+            # this adapter serves the daily bar view unless asked otherwise
+            frame = frame[frame["timeframe"] == (request.frequency or "1d")]
             if wanted_asset is not None:
                 frame = frame[frame["data_type"].map(ASSET_TYPE_MAP) == wanted_asset]
             if request.instruments is not None:
@@ -359,15 +363,17 @@ class WorkspaceTableAdapter:
         yield self.read(request)
 
     def _read_daily_metric(self, request: DataRequest) -> DataBatch:
-        files = resolve_year_files(self._root, "daily_basic.parquet", request.start, request.end)
+        files = resolve_year_dbs(self._root, request.start, request.end)
         revision = source_revision(files) if files else "wp-empty"
         if not files:
-            return _batch(ADAPTER_NAME, revision, request, "market.daily_metric", ())
+            return _batch(TABLE_ADAPTER_NAME, revision, request, "market.daily_metric", ())
         records: list[dict[str, Any]] = []
         start_s = to_yyyymmdd(request.start) if request.start is not None else None
         end_s = to_yyyymmdd(request.end) if request.end is not None else None
-        for path in files:
-            frame = read_frame(path).rename(columns={"ts_code": "instrument_id", "trade_date": "trading_date"})
+        for db_path in files:
+            frame = read_table(db_path, "daily_basic").rename(
+                columns={"ts_code": "instrument_id", "trade_date": "trading_date"}
+            )
             if request.instruments is not None:
                 frame = frame[frame["instrument_id"].isin(request.instruments)]
             if start_s is not None:
@@ -405,10 +411,10 @@ class WorkspaceTableAdapter:
     # -- instrument master --------------------------------------------------
 
     def _read_instruments(self, request: DataRequest) -> DataBatch:
-        path = self._root / "stock_basic.parquet"
-        if not path.is_file():
-            raise FileNotFoundError(f"instrument master not found: {path}")
-        frame = read_frame(path).rename(
+        db_path = self._root / REFERENCE_DB
+        if not db_path.is_file():
+            raise FileNotFoundError(f"instrument master not found: {db_path}")
+        frame = read_table(db_path, "stock_basic").rename(
             columns={"ts_code": "instrument_id", "list_date": "listed_date", "delist_date": "delisted_date"}
         )
         if request.instruments is not None:
@@ -439,15 +445,15 @@ class WorkspaceTableAdapter:
                 )
             )
         records.sort(key=lambda r: (r["instrument_id"], r["valid_from"] or date.min))
-        return _batch(TABLE_ADAPTER_NAME, source_revision([path]), request, "instrument.master", tuple(records))
+        return _batch(TABLE_ADAPTER_NAME, source_revision([db_path]), request, "instrument.master", tuple(records))
 
     # -- industry membership ------------------------------------------------
 
     def _read_industry(self, request: DataRequest) -> DataBatch:
-        path = self._root / "sw_industry.parquet"
-        if not path.is_file():
-            raise FileNotFoundError(f"industry membership not found: {path}")
-        frame = read_frame(path).rename(
+        db_path = self._root / REFERENCE_DB
+        if not db_path.is_file():
+            raise FileNotFoundError(f"industry membership not found: {db_path}")
+        frame = read_table(db_path, "sw_industry").rename(
             columns={"index_code": "industry_id", "con_code": "instrument_id", "in_date": "valid_from", "out_date": "valid_to"}
         )
         if request.instruments is not None:
@@ -477,7 +483,7 @@ class WorkspaceTableAdapter:
                 )
             )
         records.sort(key=lambda r: (r["industry_id"], r["instrument_id"], r["valid_from"]))
-        return _batch(TABLE_ADAPTER_NAME, source_revision([path]), request, "industry.membership", tuple(records))
+        return _batch(TABLE_ADAPTER_NAME, source_revision([db_path]), request, "industry.membership", tuple(records))
 
 
 def _project(record: dict[str, Any], fields: tuple[str, ...] | None) -> dict[str, Any]:
