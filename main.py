@@ -13,48 +13,26 @@ Run:
 
 from __future__ import annotations
 
-from data.adapters.memory_adapters import InMemoryCalendarAdapter, InMemoryHistoricalAdapter
 from config import settings
+from data.adapters.workspace_data import build_workspace_gateway
 from engines.fast import FastBacktestEngine
 from trading_nodes.strategies.buy_close import BuyCloseStrategy
-from trading_nodes_base.strategies import BaseStrategy
-from tools.data import DataBinding, DataGateway, DataPolicy, default_catalog
-
-# --- sample daily OHLC data ------------------------------------------------
-
-SAMPLE_DAILY = {
-    "20240102": {
-        "000001.SZ": {"open": 10.0, "high": 10.5, "low": 9.8, "close": 10.2},
-        "600000.SH": {"open": 8.0, "high": 8.4, "low": 7.9, "close": 8.2},
-    },
-    "20240103": {
-        "000001.SZ": {"open": 10.2, "high": 10.6, "low": 10.0, "close": 10.4},
-        "600000.SH": {"open": 8.2, "high": 8.6, "low": 8.1, "close": 8.3},
-    },
-}
+from tools.excel_report import export_backtest_excel
 
 
-def build_gateway() -> DataGateway:
-    """Bind the example adapters into a :class:`DataGateway`.
+def build_gateway():
+    """Bind the workspace adapters (real E:/ProgramData volume) into a gateway.
 
-    ``DataBinding.adapter`` must equal ``adapter.descriptor.name``; the adapter
-    object is passed separately so the gateway can resolve routes and call the
-    right Port.  Swap these two adapters for your own source adapters and the
-    strategy + engine stay unchanged.
+    ``build_workspace_gateway(settings.DATA_ROOT)`` serves calendar, bars,
+    daily metrics, instruments, industry membership and the per-day tick
+    volumes from the consolidated duckdb + parquet layout declared in
+    ``data/adapters/workspace_data/mappings.py``.  Swap this builder for your
+    own adapter assembly and the strategy + engine stay unchanged.
     """
-    historical = InMemoryHistoricalAdapter(SAMPLE_DAILY)
-    calendar = InMemoryCalendarAdapter()
-    return DataGateway(
-        catalog=default_catalog(),
-        bindings=[
-            (DataBinding("market.bar", historical.descriptor.name, 1, ("historical",)), historical.descriptor, historical),
-            (DataBinding("calendar.session", calendar.descriptor.name, 1, ("calendar",)), calendar.descriptor, calendar),
-        ],
-        policy=DataPolicy(strict=False, timezone="UTC"),
-    )
+    return build_workspace_gateway(settings.DATA_ROOT)
 
 
-def build_backtest() -> tuple[BaseStrategy, DataGateway]:
+def build_backtest():
     return BuyCloseStrategy(list(settings.STOCK_POOL)), build_gateway()
 
 
@@ -73,6 +51,8 @@ def main() -> int:
     stats = engine.get_stats()
     for key, value in sorted(stats.items()):
         print(f"{key}: {value}")
+    report_path = export_backtest_excel(engine, output_dir=settings.EXCEL_OUTPUT_DIR)
+    print(f"Excel report: {report_path}")
     return 0
 
 

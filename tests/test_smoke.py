@@ -3,12 +3,27 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from pathlib import Path
+
+import pytest
 
 from data.adapters.memory_adapters import InMemoryCalendarAdapter, InMemoryHistoricalAdapter
 from engines.fast import FastBacktestEngine
-from main import SAMPLE_DAILY, build_gateway
 from trading_nodes.strategies.buy_close import BuyCloseStrategy
 from tools.data import CalendarRequest, DataRequest
+
+SAMPLE_DAILY = {
+    "20240102": {
+        "000001.SZ": {"open": 10.0, "high": 10.5, "low": 9.8, "close": 10.2},
+        "600000.SH": {"open": 8.0, "high": 8.4, "low": 7.9, "close": 8.2},
+    },
+    "20240103": {
+        "000001.SZ": {"open": 10.2, "high": 10.6, "low": 10.0, "close": 10.4},
+        "600000.SH": {"open": 8.2, "high": 8.6, "low": 8.1, "close": 8.3},
+    },
+}
+
+REAL_VOLUME = Path("E:/ProgramData")
 
 
 def test_strategy_prepares_canonical_request() -> None:
@@ -18,6 +33,14 @@ def test_strategy_prepares_canonical_request() -> None:
     assert requests[0].dataset == "market.bar"
     assert requests[0].frequency == "1d"
     assert requests[0].instruments == ("000001.SZ",)
+
+
+def test_factor_targets_restrict_to_pool() -> None:
+    strategy = BuyCloseStrategy(["000001.SZ", "600000.SH"])
+    factor = strategy.timer.kline_factors[0]
+    assert factor.is_target_code("000001.SZ")
+    assert factor.is_target_code("600000.SH")
+    assert not factor.is_target_code("000001.SH")  # index codes are not in the pool
 
 
 def test_historical_adapter_serves_bars() -> None:
@@ -38,7 +61,14 @@ def test_calendar_adapter_serves_sessions() -> None:
     assert len(batch.records) == 2
 
 
+@pytest.mark.skipif(
+    not (REAL_VOLUME / "reference.duckdb").is_file(),
+    reason="workspace volume not mounted",
+)
 def test_gateway_assembles_and_runs_backtest() -> None:
+    """The real-gateway smoke path: main.build_gateway over the USB volume."""
+    from main import build_gateway
+
     gateway = build_gateway()
     strategy = BuyCloseStrategy(["000001.SZ", "600000.SH"])
     engine = FastBacktestEngine(
@@ -53,6 +83,8 @@ def test_gateway_assembles_and_runs_backtest() -> None:
     stats = engine.get_stats()
     assert stats
     assert stats["final_equity"] > 0
+    # each pool member is bought once on its first bar
+    assert stats["trade_count"] == 2
 
 
 def test_selection_factors_accept_gateway_bar_records() -> None:

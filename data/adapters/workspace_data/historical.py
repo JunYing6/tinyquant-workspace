@@ -280,8 +280,11 @@ class WorkspaceBarAdapter:
                 asset_type = ASSET_TYPE_MAP.get(data_type, data_type)
                 volume_factor = _INDEX_VOLUME_FACTOR if asset_type == "index" else _BAR_CONVERSIONS["volume"]
                 interval_start, interval_end = session_bounds(trading_date)
-                if request.as_of is not None and interval_end > request.as_of:
-                    continue  # bar becomes visible at its session close
+                # BAR_PIT: market data has no announcement delay, and the fast
+                # replay asks for the CURRENT session's bar with as_of at the
+                # decision time (session open) — visibility is scoped by the
+                # request's session bounds, not by available_at.  available_at
+                # stays at the session close for provenance.
                 raw_volume = row.get("volume")
                 raw_turnover = row.get("turnover")
                 records.append(

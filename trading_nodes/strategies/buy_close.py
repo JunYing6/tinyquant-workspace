@@ -30,9 +30,11 @@ class BuyFirstBarFactor(KlineTimingFactor):
 
     emitted_actions = frozenset({"BUY"})
 
-    def __init__(self) -> None:
+    def __init__(self, codes: list[str] | None = None) -> None:
         super().__init__("buy-first-bar")
         self._fired: set[str] = set()
+        if codes:
+            self.set_targets(set(codes))
 
     def get_query_lst(self, date: Any, codes: list[str] | None = None) -> list[Any]:
         self._data_clear()
@@ -40,7 +42,7 @@ class BuyFirstBarFactor(KlineTimingFactor):
         return []
 
     def on_bar(self, bar: Any) -> List[SignalIntent]:
-        code = getattr(bar, "instrument_id", None)
+        code = getattr(bar, "code", None)  # KlineBar carries `code`, not instrument_id
         if not isinstance(code, str) or code in self._fired:
             return []
         self._fired.add(code)
@@ -48,7 +50,7 @@ class BuyFirstBarFactor(KlineTimingFactor):
             SignalIntent(
                 code,
                 "BUY",
-                getattr(bar, "interval_end", None),
+                getattr(bar, "end_time", None),
                 "example: buy on first bar",
                 {"volume": 100},
             )
@@ -65,7 +67,7 @@ class BuyCloseStrategy(BaseStrategy):
         selector = FixedStockPicking(pool)
         timer = BaseTimeSelection(
             f"{self.__class__.__name__}-timer",
-            [BuyFirstBarFactor(), PassiveTimingFactor()],
+            [BuyFirstBarFactor(pool), PassiveTimingFactor()],
             [IntentExecutorFactor()],
         )
         super().__init__(
