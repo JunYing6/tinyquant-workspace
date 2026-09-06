@@ -20,6 +20,7 @@ dev = [
 workspace-data = [
     "pandas>=2.0",
     "pyarrow>=14.0",
+    "polars>=1.0",
 ]
 
 [tool.setuptools.packages.find]
