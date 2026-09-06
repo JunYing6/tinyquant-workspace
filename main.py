@@ -13,7 +13,7 @@ Run:
 
 from __future__ import annotations
 
-from config import settings
+from config import release_settings, settings
 from data.adapters.workspace_data import build_workspace_gateway
 from engines.fast import FastBacktestEngine
 from trading_nodes.strategies.buy_close import BuyCloseStrategy
@@ -51,7 +51,7 @@ def main() -> int:
     stats = engine.get_stats()
     for key, value in sorted(stats.items()):
         print(f"{key}: {value}")
-    report_path = export_backtest_excel(engine, output_dir=settings.EXCEL_OUTPUT_DIR)
+    report_path = export_backtest_excel(engine, output_dir=release_settings.EXCEL_OUTPUT_DIR)
     print(f"Excel report: {report_path}")
     return 0
 

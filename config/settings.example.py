@@ -13,5 +13,5 @@ INITIAL_CAPITAL = 1_000_000.0
 # Realtime quote/trade config (depends on your adapter)
 QUOTE_TOKEN = ""
 
-# Excel backtest report output directory (absolute or relative to CWD).
-EXCEL_OUTPUT_DIR = "excel_reports"
+# Release-component knobs (excel report output, engine tuning) are NOT set
+# here — see release_settings.py, tracked directly in the config package.
