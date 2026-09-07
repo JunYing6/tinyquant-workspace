@@ -15,6 +15,10 @@ venv/
 data/cache/
 data/raw/
 
+# Excel backtest reports (generated output)
+excel_reports/*
+!excel_reports/.gitkeep
+
 # IDE
 .idea/
 .vscode/

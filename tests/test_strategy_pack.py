@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 
@@ -13,6 +13,7 @@ from trading_nodes.methods.selector.fixed import FixedStockPicking
 from trading_nodes.methods.timer.passive import NoTradeTiming
 from trading_nodes.methods.risk.full_position import FullPositionRisk
 from trading_nodes.minds.weighting import KellyPositionMind, MarketRegimeMind, PerformanceWeightMind
+from tools.data import Bar, InMemoryGateway, Session, TradingPhase
 from trading_nodes.strategies.simple_strategies import (
     AtrStopStrategy,
     BreakoutRiskStrategy,
@@ -25,7 +26,6 @@ from trading_nodes.strategies.simple_strategies import (
     MomentumPickStrategy,
 )
 from trading_nodes.streams.multi_strategy import MultiStrategyStream
-from data.adapters.strategy_data import InMemoryStrategyData
 from engines.fast import FastBacktestEngine
 
 
@@ -117,15 +117,32 @@ def test_regime_mind_routes_downside_sideways_and_uptrend() -> None:
     assert mind.calculate_weights({"regime": "up"}, {"empty-position": {}, "momentum-pick": {}, "mean-reversion": {}})["momentum-pick"] == 1.0
 
 
+def _two_day_gateway() -> InMemoryGateway:
+    """Minimal hermetic fixture: two sessions, one bar per day."""
+    bars, sessions = [], []
+    for day in ("20240102", "20240103"):
+        close = datetime.strptime(day, "%Y%m%d").replace(hour=15, tzinfo=timezone.utc)
+        phase = TradingPhase(name="regular", start=close.replace(hour=9), end=close, accepts_trades=True, accepts_quotes=True)
+        sessions.append(Session(market="CN", trading_date=close.date(), timezone="UTC", phases=(phase,)))
+        bars.append(Bar(
+            schema_version="1", event_id=None, instrument_id="000001.SZ", asset_type="equity",
+            effective_time=close, event_time=close, available_at=close, trading_date=close.date(),
+            source="test", quality="valid", metadata={}, frequency="1d",
+            interval_start=close.replace(hour=9), interval_end=close,
+            open=10.0, high=11.0, low=9.5, close=10.5, volume=1000.0, turnover=10500.0,
+            is_complete=True, price_basis="raw",
+        ))
+    return InMemoryGateway(bars=bars, sessions=sessions)
+
+
 def test_empty_position_strategy_stays_empty_in_fast_backtest() -> None:
-    data = InMemoryStrategyData()
     strategy = EmptyPositionStrategy()
     engine = FastBacktestEngine(
         strategy,
-        data._sessions[0].trading_date.strftime("%Y%m%d"),
-        data._sessions[-1].trading_date.strftime("%Y%m%d"),
+        "20240102",
+        "20240103",
         mode="fast",
-        data_gateway=data,
+        data_gateway=_two_day_gateway(),
         progress_bar=False,
     )
     engine.run()

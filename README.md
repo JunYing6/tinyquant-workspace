@@ -52,6 +52,10 @@ tq backtest run main:build_backtest --start 20240102 --end 20240103
 
 `tq` 属于已安装的发布版 `tinyquant[cli]`，不需要在本项目内重复实现。
 
+## Excel 回测报告
+
+`main.py` 和 `run_multi.py` 在回测结束后自动把结果导出为 Excel 工作簿（策略概览、权益曲线、交易记录、持仓明细、月度收益），输出目录由 `config/settings.py` 的 `EXCEL_OUTPUT_DIR` 配置，默认为项目根目录下的 `excel_reports/` 文件夹（不存在时自动创建）。`tq backtest run` 的输出目录见发布版 README（`--excel-dir` / `TINYQUANT_EXCEL_DIR` / 默认 `./excel_reports`）。
+
 ## 开发约定
 
 - `trading_nodes/` 只编写具体节点逻辑和标准数据请求。

@@ -2,26 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 
-from data.adapters.memory_adapters import InMemoryCalendarAdapter, InMemoryHistoricalAdapter
 from engines.fast import FastBacktestEngine
 from trading_nodes.strategies.buy_close import BuyCloseStrategy
-from tools.data import CalendarRequest, DataRequest
-
-SAMPLE_DAILY = {
-    "20240102": {
-        "000001.SZ": {"open": 10.0, "high": 10.5, "low": 9.8, "close": 10.2},
-        "600000.SH": {"open": 8.0, "high": 8.4, "low": 7.9, "close": 8.2},
-    },
-    "20240103": {
-        "000001.SZ": {"open": 10.2, "high": 10.6, "low": 10.0, "close": 10.4},
-        "600000.SH": {"open": 8.2, "high": 8.6, "low": 8.1, "close": 8.3},
-    },
-}
+from tools.data import DataRequest
 
 REAL_VOLUME = Path("E:/ProgramData")
 
@@ -41,24 +29,6 @@ def test_factor_targets_restrict_to_pool() -> None:
     assert factor.is_target_code("000001.SZ")
     assert factor.is_target_code("600000.SH")
     assert not factor.is_target_code("000001.SH")  # index codes are not in the pool
-
-
-def test_historical_adapter_serves_bars() -> None:
-    adapter = InMemoryHistoricalAdapter(SAMPLE_DAILY)
-    request = DataRequest(dataset="market.bar", anchor=date(2024, 1, 2), frequency="1d")
-    batch = adapter.read(request)
-    assert batch.dataset == "market.bar"
-    assert batch.records
-    assert all(hasattr(record, "instrument_id") for record in batch.records)
-
-
-def test_calendar_adapter_serves_sessions() -> None:
-    adapter = InMemoryCalendarAdapter()
-    batch = adapter.sessions(
-        CalendarRequest(market="CN", start=date(2024, 1, 2), end=date(2024, 1, 3))
-    )
-    assert batch.dataset == "calendar.session"
-    assert len(batch.records) == 2
 
 
 @pytest.mark.skipif(
