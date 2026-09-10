@@ -8,6 +8,13 @@ dist/
 .venv/
 venv/
 
+# Secrets / credentials (never commit)
+config/secrets.py
+.env
+.env.*
+!.env.example
+!config/secrets.example.py
+
 # Local data artifacts
 *.duckdb
 *.duckdb.wal

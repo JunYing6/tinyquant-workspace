@@ -13,7 +13,8 @@ client is always injected by the caller — nothing here reads tokens or
 credentials::
 
     import tushare as ts
-    client = ts.pro_api(token)          # caller's responsibility
+    from config import secrets
+    client = ts.pro_api(secrets.TUSHARE_TOKEN)  # token in git-ignored config/secrets.py
     downloader = TushareDownloader(client=client, root="E:/ProgramData")
     downloader.download("trade_data/daily", "20240102", "20241231")
 

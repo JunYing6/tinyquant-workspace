@@ -8,9 +8,10 @@ on the write side.  Vendor fields stay vendor-native (no renaming, no unit
 conversion); the client is always injected — nothing here reads tokens.
 
     import tushare as ts
+    from config import secrets
     from data.downloader import TushareDownloader
 
-    downloader = TushareDownloader(client=ts.pro_api(token), root="E:/ProgramData")
+    downloader = TushareDownloader(client=ts.pro_api(secrets.TUSHARE_TOKEN), root="E:/ProgramData")
     downloader.download("trade_data/daily", "20240102", "20241231")
     downloader.download("trade_data/tick", "20240102", "20240131",
                         options={"csv_root": "E:/2024"})
