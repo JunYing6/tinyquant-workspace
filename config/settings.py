@@ -16,3 +16,7 @@ QUOTE_TOKEN = ""
 # Root of the consolidated workspace volume (duckdb tables + per-day parquet)
 # used by the adapters.workspace_data package (the USB data drive).
 DATA_ROOT = os.environ.get("QUANT_DATA_ROOT", "E:/ProgramData")
+
+# module:function factory used to assemble the DataGateway.  Swap this to point
+# at another adapter builder without editing code.
+DATA_GATEWAY_FACTORY = "data.adapters.workspace_data:build_workspace_gateway"

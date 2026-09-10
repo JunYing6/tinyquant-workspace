@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from config import settings
-from data.adapters.workspace_data import build_workspace_gateway
+from data.adapters import build_gateway
 from trading_nodes.strategies.buy_close import BuyCloseStrategy
 from trading_nodes.strategies.simple_strategies import (
     AtrStopStrategy,
@@ -17,52 +17,48 @@ from trading_nodes.strategies.simple_strategies import (
 from trading_nodes.streams.multi_strategy import MultiStrategyStream
 
 
-def _gateway():
-    return build_workspace_gateway(settings.DATA_ROOT)
-
-
 def build_buy_close():
-    return BuyCloseStrategy(list(settings.STOCK_POOL)), _gateway()
+    return BuyCloseStrategy(list(settings.STOCK_POOL)), build_gateway()
 
 
 def build_dual_ma():
-    return DualMaStrategy(list(settings.STOCK_POOL)), _gateway()
+    return DualMaStrategy(list(settings.STOCK_POOL)), build_gateway()
 
 
 def build_breakout():
-    return BreakoutStrategy(list(settings.STOCK_POOL)), _gateway()
+    return BreakoutStrategy(list(settings.STOCK_POOL)), build_gateway()
 
 
 def build_mean_reversion():
-    return MeanReversionStrategy(list(settings.STOCK_POOL)), _gateway()
+    return MeanReversionStrategy(list(settings.STOCK_POOL)), build_gateway()
 
 
 def build_golden_cross():
-    return GoldenCrossStrategy(list(settings.STOCK_POOL)), _gateway()
+    return GoldenCrossStrategy(list(settings.STOCK_POOL)), build_gateway()
 
 
 def build_atr_stop():
-    return AtrStopStrategy(list(settings.STOCK_POOL)), _gateway()
+    return AtrStopStrategy(list(settings.STOCK_POOL)), build_gateway()
 
 
 def build_breakout_risk():
-    return BreakoutRiskStrategy(list(settings.STOCK_POOL)), _gateway()
+    return BreakoutRiskStrategy(list(settings.STOCK_POOL)), build_gateway()
 
 
 def build_momentum_pick():
-    return MomentumPickStrategy(list(settings.STOCK_POOL)), _gateway()
+    return MomentumPickStrategy(list(settings.STOCK_POOL)), build_gateway()
 
 
 def build_filter_pick():
-    return FilterPickStrategy(list(settings.STOCK_POOL)), _gateway()
+    return FilterPickStrategy(list(settings.STOCK_POOL)), build_gateway()
 
 
 def build_empty_position():
-    return EmptyPositionStrategy(list(settings.STOCK_POOL)), _gateway()
+    return EmptyPositionStrategy(list(settings.STOCK_POOL)), build_gateway()
 
 
 def build_stream():
-    return MultiStrategyStream(), _gateway()
+    return MultiStrategyStream(), build_gateway()
 
 
 BACKTESTS = [

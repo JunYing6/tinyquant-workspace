@@ -1,19 +1,12 @@
-"""Assemble a user-side DataGateway and run a backtest.
-
-This is the recommended entry point for a user project:
-
-1. put your strategies under ``trading_nodes/``,
-2. implement your data adapters under ``data/adapters/``,
-3. bind them into a ``DataGateway`` here and feed it to the engine.
+"""User-side entry point for the tinyquant workspace.
 
 Run ``python main.py`` with no arguments to start the ``tq`` CLI workbench
-(interactive REPL); any arguments are forwarded to the CLI, e.g.:
+(interactive REPL); any arguments are forwarded to the CLI.  If the CLI
+(``tinyquant`` installed with the ``[cli]`` extra) is not available,
+``main.py`` falls back to running the buy-close backtest directly.
 
-    D:\\Apps\\Python312\\python.exe main.py
-    D:\\Apps\\Python312\\python.exe main.py backtest run main:build_backtest --start 20240102 --end 20240103
-
-If the CLI (``tinyquant`` installed with the ``[cli]`` extra) is not
-available, ``main.py`` falls back to running the backtest directly.
+Backtest factories and the registry live in ``trading_nodes/backtests.py``;
+the data gateway is assembled from ``config/settings.DATA_GATEWAY_FACTORY``.
 """
 
 from __future__ import annotations
@@ -21,30 +14,14 @@ from __future__ import annotations
 import sys
 
 from config import release_settings, settings
-from data.adapters.workspace_data import build_workspace_gateway
 from engines.fast import FastBacktestEngine
-from trading_nodes.strategies.buy_close import BuyCloseStrategy
 from tools.excel_report import export_backtest_excel
 
 
-def build_gateway():
-    """Bind the workspace adapters (real E:/ProgramData volume) into a gateway.
-
-    ``build_workspace_gateway(settings.DATA_ROOT)`` serves calendar, bars,
-    daily metrics, instruments, industry membership and the per-day tick
-    volumes from the consolidated duckdb + parquet layout declared in
-    ``data/adapters/workspace_data/mappings.py``.  Swap this builder for your
-    own adapter assembly and the strategy + engine stay unchanged.
-    """
-    return build_workspace_gateway(settings.DATA_ROOT)
-
-
-def build_backtest():
-    return BuyCloseStrategy(list(settings.STOCK_POOL)), build_gateway()
-
-
 def _run_backtest(write_excel: bool, excel_dir: str | None = None) -> int:
-    strategy, gateway = build_backtest()
+    from trading_nodes.backtests import build_buy_close
+
+    strategy, gateway = build_buy_close()
     engine = FastBacktestEngine(
         strategy,
         settings.BACKTEST_START,
