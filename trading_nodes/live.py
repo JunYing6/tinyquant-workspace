@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from config import secrets, settings
+from data.adapters.workspace_data import build_workspace_gateway
 from engines.realtime import RealTimeTradeEngine
 
 try:
@@ -159,6 +160,10 @@ def build_live(
     return RealTimeTradeEngine(strategy, gateway, executor, initial_capital=initial_capital, market=settings.LIVE_MARKET)
 
 
+def build_realtime_gateway(quote_client: Any) -> Any:
+    return build_workspace_gateway(settings.DATA_ROOT, realtime_client=quote_client)
+
+
 __all__ = [
     "EXECUTORS",
     "GMTradeExecutor",
@@ -167,4 +172,5 @@ __all__ = [
     "build_executor",
     "build_live",
     "build_quote_client",
+    "build_realtime_gateway",
 ]
