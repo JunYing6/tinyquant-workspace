@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from data.adapters.workspace_data import build_workspace_gateway
 from data.adapters.workspace_data.realtime import WorkspaceRealtimeAdapter
 from data.realtime.base import Level1Tick
 from data.realtime.mock import MockQuoteClient
@@ -60,3 +61,19 @@ def test_subscribe_returns_cancellable_subscription() -> None:
     assert subscription.is_active()
     subscription.cancel()
     assert not subscription.is_active()
+
+
+def test_gateway_subscribe_routes_realtime_tick() -> None:
+    client = MockQuoteClient()
+    gateway = build_workspace_gateway(data_root=None, realtime_client=client)
+    received = []
+    gateway.subscribe(
+        StreamRequest(dataset="market.trade", instruments=("600519",)),
+        received.append,
+    )
+
+    client.emit(_tick())
+
+    assert len(received) == 1
+    assert isinstance(received[0], TradeTick)
+    assert received[0].instrument_id == "600519"

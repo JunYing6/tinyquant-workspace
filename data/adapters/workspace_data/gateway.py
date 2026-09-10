@@ -13,6 +13,7 @@ from data.adapters.workspace_data.historical import (
     WorkspaceCalendarAdapter,
     WorkspaceTableAdapter,
 )
+from data.adapters.workspace_data.realtime import WorkspaceRealtimeAdapter
 from data.adapters.workspace_data.ticks import WorkspaceTickAdapter
 
 DEFAULT_DATA_ROOT = "E:/ProgramData"
@@ -23,6 +24,7 @@ def build_workspace_gateway(
     *,
     market: str = "CN",
     policy: DataPolicy | None = None,
+    realtime_client: Any = None,
     **gateway_kwargs: Any,
 ) -> DataGateway:
     """Assemble a :class:`DataGateway` over the consolidated workspace volume
@@ -34,6 +36,11 @@ def build_workspace_gateway(
     ``market.daily_snapshot`` composite view.  Phase-2 datasets (financials,
     events, auxiliary tables) and ``contract_only`` datasets have no binding
     yet and fail with ``UnsupportedDatasetError`` when requested.
+
+    When ``realtime_client`` is provided, ``market.trade`` / ``market.quote``
+    also get a realtime (push/poll) binding served by
+    :class:`WorkspaceRealtimeAdapter`, so live engines can subscribe through
+    the gateway.
     """
     root = Path(data_root) if data_root is not None else _default_root()
     calendar_adapter = WorkspaceCalendarAdapter(root, market)
@@ -61,6 +68,10 @@ def build_workspace_gateway(
         _bind("market.quote", ticks),
         _bind("market.daily_snapshot", snapshot),
     ]
+    if realtime_client is not None:
+        realtime = WorkspaceRealtimeAdapter(realtime_client, market)
+        bindings.append(_bind("market.trade", realtime, priority=2, modes=("push", "poll")))
+        bindings.append(_bind("market.quote", realtime, priority=2, modes=("push", "poll")))
     return DataGateway(
         catalog=default_catalog(),
         bindings=bindings,
