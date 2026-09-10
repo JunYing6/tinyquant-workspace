@@ -6,3 +6,5 @@ commit ``config/secrets.py``; it is git-ignored.
 
 TUSHARE_TOKEN = ""
 QUOTE_TOKEN = ""
+JVQUANT_TOKEN = ""
+GM_TOKEN = ""

@@ -27,3 +27,9 @@ DATA_ROOT = os.environ.get("QUANT_DATA_ROOT", "E:/ProgramData")
 # module:function factory used to assemble the DataGateway.  Swap this to point
 # at another adapter builder without editing code.
 DATA_GATEWAY_FACTORY = "data.adapters.workspace_data:build_workspace_gateway"
+
+# Live trading: realtime quote client factory, executor route, capital, market.
+REALTIME_QUOTE_CLIENT = "data.realtime.jvquant:JvQuantQuoteClient"
+LIVE_EXECUTOR_ROUTE = "paper"
+LIVE_INITIAL_CAPITAL = 1_000_000.0
+LIVE_MARKET = "CN"
