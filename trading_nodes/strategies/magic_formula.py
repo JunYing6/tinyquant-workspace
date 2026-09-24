@@ -54,7 +54,7 @@ def _as_record(row: Any) -> Dict[str, Any]:
 
 
 class EarningsYieldFactor(FloatSelectionFactor):
-    """EBIT / Enterprise Value.  The valuation half of the formula."""
+    """盈利收益率因子（EBIT / 企业价值），神奇公式的第一个打分维度。"""
 
     def __init__(self, universe: Sequence[str]) -> None:
         super().__init__("earnings-yield")
@@ -62,8 +62,8 @@ class EarningsYieldFactor(FloatSelectionFactor):
 
     def get_query_lst(self, date: Any, codes: Optional[list[str]] = None) -> list[dict]:
         self._data_clear()
-        self.sign["fit"] = True
         universe = codes or self.universe
+        # 声明式数据需求：财务报表字段 + 总市值
         return [
             {
                 "type": "fina/report",
@@ -96,21 +96,21 @@ class EarningsYieldFactor(FloatSelectionFactor):
             operate_profit = fields.get("operate_profit")
             total_mv = fields.get("total_mv")
             if operate_profit is None or not total_mv or total_mv <= 0:
-                continue
-            ebit = operate_profit + (fields.get("fin_exp") or 0.0)
+                continue  # 关键数据缺失则跳过
+            ebit = operate_profit + (fields.get("fin_exp") or 0.0)  # EBIT = 营业利润 + 财务费用
             if ebit <= 0:
                 continue
             debt = (fields.get("st_borr") or 0.0) + (fields.get("lt_borr") or 0.0)
             cash = fields.get("money_cap") or 0.0
-            enterprise_value = total_mv + debt - cash
+            enterprise_value = total_mv + debt - cash  # EV = 总市值 + 有息负债 - 货币资金
             if enterprise_value <= 0:
                 continue
-            values[code] = ebit / enterprise_value
+            values[code] = ebit / enterprise_value  # 盈利收益率越高越好
         return pd.Series(values, dtype=float)
 
 
 class ReturnOnCapitalFactor(FloatSelectionFactor):
-    """EBIT / Invested Capital via the ``roic`` indicator.  The quality half."""
+    """资本回报率因子（用 roic 指标），神奇公式的第二打分维度。"""
 
     def __init__(self, universe: Sequence[str]) -> None:
         super().__init__("return-on-capital")
@@ -118,7 +118,7 @@ class ReturnOnCapitalFactor(FloatSelectionFactor):
 
     def get_query_lst(self, date: Any, codes: Optional[list[str]] = None) -> list[dict]:
         self._data_clear()
-        self.sign["fit"] = True
+        # 声明式数据需求：roic 财务指标
         return [
             {
                 "type": "fina/report",
@@ -141,12 +141,12 @@ class ReturnOnCapitalFactor(FloatSelectionFactor):
                     except (TypeError, ValueError):
                         continue
                     if value > 0:
-                        values[code] = value
+                        values[code] = value  # 资本回报率越高越好
         return pd.Series(values, dtype=float)
 
 
 class MagicFormulaPicking(BaseStockPicking):
-    """Rank the universe by the two factors and pick the top names."""
+    """按两个因子对股票池排序，选取综合排名靠前的标的（备选池）。"""
 
     def __init__(self, universe: Sequence[str], top_n: int = 30) -> None:
         self.top_n = int(top_n)
@@ -168,10 +168,12 @@ class MagicFormulaPicking(BaseStockPicking):
         if frame.empty:
             return MagicFormulaPicking._empty()
         frame.columns = ["earnings_yield", "roic"]
+        # 只保留两因子均为正的盈利标的
         profitable = (frame["earnings_yield"] > 0) & (frame["roic"] > 0)
         frame = frame[profitable].dropna()
         if frame.empty:
             return MagicFormulaPicking._empty()
+        # 各因子降序排名后求和，取排名之和最小（综合最优）的 top_n 只等权持有
         rank_yield = frame["earnings_yield"].rank(ascending=False)
         rank_roic = frame["roic"].rank(ascending=False)
         combined = (rank_yield + rank_roic).sort_values()
@@ -188,7 +190,7 @@ class MagicFormulaPicking(BaseStockPicking):
 
 
 class MagicFormulaRebalanceFactor(KlineTimingFactor):
-    """Semi-annual rebalance: sell exited names, buy newly selected names."""
+    """半年度调仓择时因子：卖出退出名单、买入新入选名单。"""
 
     frequency = "1d"
     emitted_actions = frozenset({"BUY", "SELL"})
@@ -202,33 +204,35 @@ class MagicFormulaRebalanceFactor(KlineTimingFactor):
 
     def get_query_lst(self, date: Any, codes: Optional[list[str]] = None) -> list[dict]:
         self._data_clear()
-        self.sign["fit"] = True
         return []
 
     def on_bar(self, bar: Any) -> List[SignalIntent]:
         end_time = getattr(bar, "end_time", None)
         if isinstance(end_time, datetime) and end_time.month not in self.rebalance_months:
-            return []
+            return []  # 非调仓月份不动作
         if isinstance(end_time, datetime):
             period_key = (end_time.year, end_time.month)
         else:
             return []
         if period_key != self._last_rebalance:
+            # 进入新的调仓周期：刷新上次周期记录与已发信号集合
             self._last_rebalance = period_key
             self._emitted.clear()
         code = getattr(bar, "code", None)
         if not code or code in self._emitted:
-            return []
-        target = set(self.timer.selector_pool) if self.timer else set()
-        held = set(self.timer.position_pool) if self.timer else set()
+            return []  # 每个周期每只股票只发一次信号
+        target = set(self.timer.selector_pool) if self.timer else set()  # 应持有名单
+        held = set(self.timer.position_pool) if self.timer else set()    # 当前持仓名单
         intents: List[SignalIntent] = []
         if code in target and code not in held:
+            # 新入选 -> 买入
             size = 1.0 / len(target) if target else 1.0
             intents.append(SignalIntent(
                 code, "BUY", end_time, "magic-formula-buy", {"sizing_intent": size}
             ))
             self._emitted.add(code)
         elif code in held and code not in target:
+            # 被剔除 -> 卖出
             intents.append(SignalIntent(
                 code, "SELL", end_time, "magic-formula-sell", {"sizing_intent": 1.0}
             ))
@@ -237,7 +241,7 @@ class MagicFormulaRebalanceFactor(KlineTimingFactor):
 
 
 class MagicFormulaStrategy(BaseStrategy):
-    """Hold the top Magic Formula names, rebalanced semi-annually."""
+    """持有神奇公式选出的标的，半年度再平衡。"""
 
     supports_fast_backtest = True
 

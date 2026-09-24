@@ -1,3 +1,13 @@
+"""预置的简单策略（Simple Strategies）集合。
+
+每个策略由三段节点拼装而成：
+- 选股器(Selector)：决定候选股票池。
+- 择时(Timer)：决定何时买卖（K 线因子 + 信号执行因子）。
+- 风控(RiskControl)：决定仓位与是否允许交易。
+
+默认股票池为 ["000001.SZ", "600000.SH"]，可通过 stock_pool 覆盖。
+"""
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -19,10 +29,13 @@ from trading_nodes_base.strategies import BaseStrategy
 
 
 def _timing(name: str, factors: list) -> BaseTimeSelection:
+    """组装一个择时器：K 线因子 + 统一的信号执行因子。"""
     return BaseTimeSelection(name, factors, [IntentExecutorFactor()])
 
 
 class DualMaStrategy(BaseStrategy):
+    """双均线交叉择时策略：指定股票池 + 双均线买卖 + 满仓。"""
+
     supports_fast_backtest = True
 
     def __init__(self, stock_pool: Sequence[str] | None = None) -> None:
@@ -31,6 +44,8 @@ class DualMaStrategy(BaseStrategy):
 
 
 class BreakoutStrategy(BaseStrategy):
+    """区间突破择时策略：突破买入/跌破卖出 + 满仓。"""
+
     supports_fast_backtest = True
 
     def __init__(self, stock_pool: Sequence[str] | None = None) -> None:
@@ -39,6 +54,8 @@ class BreakoutStrategy(BaseStrategy):
 
 
 class MeanReversionStrategy(BaseStrategy):
+    """RSI 均值回归策略：超卖买/超买卖 + 满仓。"""
+
     supports_fast_backtest = True
 
     def __init__(self, stock_pool: Sequence[str] | None = None) -> None:
@@ -47,6 +64,8 @@ class MeanReversionStrategy(BaseStrategy):
 
 
 class GoldenCrossStrategy(BaseStrategy):
+    """均线多头排列（金叉）策略：排列成立买入/破坏卖出 + 满仓。"""
+
     supports_fast_backtest = True
 
     def __init__(self, stock_pool: Sequence[str] | None = None) -> None:
@@ -55,6 +74,8 @@ class GoldenCrossStrategy(BaseStrategy):
 
 
 class AtrStopStrategy(BaseStrategy):
+    """ATR 止损策略：双均线择时 + ATR 止损风控。"""
+
     supports_fast_backtest = True
 
     def __init__(self, stock_pool: Sequence[str] | None = None) -> None:
@@ -63,6 +84,8 @@ class AtrStopStrategy(BaseStrategy):
 
 
 class BreakoutRiskStrategy(BaseStrategy):
+    """区间突破 + ATR 止损策略。"""
+
     supports_fast_backtest = True
 
     def __init__(self, stock_pool: Sequence[str] | None = None) -> None:
@@ -71,6 +94,8 @@ class BreakoutRiskStrategy(BaseStrategy):
 
 
 class MomentumPickStrategy(BaseStrategy):
+    """动量选股策略：动量打分选股 + 被动择时 + 满仓。"""
+
     supports_fast_backtest = True
 
     def __init__(self, stock_pool: Sequence[str] | None = None) -> None:
@@ -79,6 +104,8 @@ class MomentumPickStrategy(BaseStrategy):
 
 
 class FilterPickStrategy(BaseStrategy):
+    """价格过滤选股策略：均线过滤选股 + 被动择时 + 满仓。"""
+
     supports_fast_backtest = True
 
     def __init__(self, stock_pool: Sequence[str] | None = None) -> None:
@@ -87,6 +114,8 @@ class FilterPickStrategy(BaseStrategy):
 
 
 class EmptyPositionStrategy(BaseStrategy):
+    """空仓策略：空股票池，不做任何交易。"""
+
     supports_fast_backtest = True
 
     def __init__(self, stock_pool: Sequence[str] | None = None) -> None:

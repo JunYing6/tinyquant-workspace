@@ -1,3 +1,13 @@
+"""基于因子的选股器（Selector）组合。
+
+把"因子（打分层）"与"选股器（结果层）"组装起来：
+- MomentumSelector：动量打分选股，用 MomentumSelectionFactor 排序。
+- PriceFilterSelector：价格均线过滤选股，用 PriceAboveMaSelectionFactor 过滤。
+
+注意：这两个选股器在 select_stocks() 阶段仍直接返回给定的 stock_pool，
+因子层由框架在择时/打分阶段消费，此处体现"因子 + 选股器"的节点结构。
+"""
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -14,6 +24,7 @@ from trading_nodes_base.methods import BaseStockPicking
 
 
 def _pool_frame(stock_pool: Sequence[str]) -> pd.DataFrame:
+    """把股票池转为等权 asset/weight 数据表；空池返回空表。"""
     if not stock_pool:
         return pd.DataFrame(columns=["asset", "weight"])
     weight = 1.0 / len(stock_pool)
@@ -21,6 +32,8 @@ def _pool_frame(stock_pool: Sequence[str]) -> pd.DataFrame:
 
 
 class MomentumSelector(BaseStockPicking):
+    """动量选股器：搭载动量打分因子。"""
+
     def __init__(self, stock_pool: Sequence[str] | None = None) -> None:
         self.stock_pool = list(dict.fromkeys(stock_pool or []))
         factor = MomentumSelectionFactor()
@@ -31,6 +44,8 @@ class MomentumSelector(BaseStockPicking):
 
 
 class PriceFilterSelector(BaseStockPicking):
+    """价格过滤选股器：搭载"股价站上均线"过滤因子。"""
+
     def __init__(self, stock_pool: Sequence[str] | None = None) -> None:
         self.stock_pool = list(dict.fromkeys(stock_pool or []))
         factor = PriceAboveMaSelectionFactor()

@@ -89,7 +89,6 @@ def test_selection_factors_accept_gateway_bar_records() -> None:
 
     price_factor = PriceAboveMaSelectionFactor(window=1)
     price_factor._begin_request_generation()
-    price_factor.sign["fit"] = True
     price_factor._register_request("data")
     price_factor.receive_data({"request_id": "data"}, batch.records)
     price_factor.sign["data"] = True
@@ -97,7 +96,6 @@ def test_selection_factors_accept_gateway_bar_records() -> None:
 
     momentum_factor = MomentumSelectionFactor(window=1)
     momentum_factor._begin_request_generation()
-    momentum_factor.sign["fit"] = True
     momentum_factor._register_request("data")
     momentum_factor.receive_data({"request_id": "data"}, batch.records)
     momentum_factor.sign["data"] = True
