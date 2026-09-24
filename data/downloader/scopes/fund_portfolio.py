@@ -1,14 +1,11 @@
-"""Fund portfolio (top holdings) fetcher (legacy scope ``fund/portfolio``).
+"""基金持仓（前十大重仓）获取器（旧作用域 ``fund/portfolio``）。
 
-Calls the vendor ``fund_portfolio`` interface per report period with offset
-pagination (8000 rows per page) and lands the raw rows at
-``{root}/fund_portfolio.parquet`` (global table, deduplicated on
-``fund_code``+``end_date``+``ts_code``).
+按报告期调用厂商 ``fund_portfolio`` 接口，使用 offset 分页（每页 8000 行），将原始行写入
+``{root}/fund_portfolio.parquet``（全局表，按 ``fund_code``+``end_date``+``ts_code`` 去重）。
 
-The legacy layout renames the vendor columns ``ts_code`` (the fund) ->
-``fund_code`` and ``symbol`` (the held stock) -> ``ts_code`` — that rename
-reproduces the on-disk contract (verified against the real volume), it is not
-a semantic mapping.  ``mkv``/``amount`` stay in vendor ten-thousand units.
+旧布局将厂商列 ``ts_code``（基金）重命名为 ``fund_code``，将 ``symbol``（所持股票）重命名为
+``ts_code``——该重命名复现的是磁盘上的契约（已对照真实卷验证），并非语义映射。
+``mkv``/``amount`` 保持厂商的万元单位。
 """
 
 from __future__ import annotations
@@ -39,7 +36,7 @@ def fetch_fund_portfolio(
     sleep: float = 0.3,
     **options: Any,
 ) -> pd.DataFrame:
-    """Fetch fund top-holdings rows for every report period in the range."""
+    """按区间内的每个报告期拉取基金前十大重仓股行。"""
     quarters = quarter_end_dates(start, end)
     logger.info("[fund_portfolio] 报告期: %d 个", len(quarters))
     max_requests = options.get("max_requests", 180)
@@ -77,7 +74,7 @@ def fetch_fund_portfolio(
             continue
 
         combined = pd.concat(pages, ignore_index=True)
-        # legacy on-disk contract: the fund is fund_code, the held stock is ts_code
+        # 磁盘上的旧版契约：基金是 fund_code，所持股票是 ts_code
         rename_map = {}
         if "ts_code" in combined.columns:
             rename_map["ts_code"] = "fund_code"

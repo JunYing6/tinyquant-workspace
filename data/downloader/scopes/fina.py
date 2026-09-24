@@ -1,10 +1,8 @@
-"""Financial indicator fetcher (legacy scope ``fina/indicator``).
+"""财务指标获取器（旧作用域 ``fina/indicator``）。
 
-Calls the vendor ``fina_indicator_vip`` interface per report period with
-offset pagination and lands the raw rows at
-``{root}/fina_indicator.parquet`` (global table, deduplicated on
-``ts_code``+``end_date``+``ann_date`` so re-announced revisions are kept).
-``ann_date`` is the PIT anchor — the fetcher refuses to write without it.
+按报告期调用厂商 ``fina_indicator_vip`` 接口，使用 offset 分页，将原始行写入
+``{root}/fina_indicator.parquet``（全局表，按 ``ts_code``+``end_date``+``ann_date`` 去重，
+因此重新公告的修订版本会被保留）。``ann_date`` 是 PIT 锚点——没有它获取器拒绝写入。
 """
 
 from __future__ import annotations
@@ -40,7 +38,7 @@ def fetch_fina_indicator(
     sleep: float = 0.3,
     **options: Any,
 ) -> pd.DataFrame:
-    """Fetch quarterly financial indicators for every report period in the range."""
+    """按区间内的每个报告期拉取季度财务指标。"""
     periods = report_periods(start, end)
     logger.info("[fina] 报告期列表: %s", periods)
 

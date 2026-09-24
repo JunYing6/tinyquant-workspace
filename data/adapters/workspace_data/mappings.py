@@ -1,41 +1,38 @@
-"""Migration mappings from legacy Tushare-layout data files to release datasets.
+"""从旧版 Tushare 布局数据文件到发布数据集的数据迁移映射。
 
-Every first-release dataset declared by ``tools.data.datasets.default_catalog``
-has exactly one :class:`MigrationMapping` entry here.  The mapping is the
-machine-auditable contract between the physical ``E:/ProgramData`` layout and
-the standard catalog: column aliases, unit conversions, time semantics and the
-conservative point-in-time rule all live in this module so that conversion
-mistakes are visible and fixable in one place.
+``tools.data.datasets.default_catalog`` 声明的每个首发数据集在此都恰好有一条
+:class:`MigrationMapping` 记录。该映射是物理 ``E:/ProgramData`` 布局与标准
+目录之间的可机读契约：列别名、单位换算、时间语义以及保守的时点规则全部集中
+在本模块中，使转换错误在一处可见、可修复。
 
-Physical layout (consolidated 2026-09-06):
+物理布局（2026-09-06 整合）：
 
-- ``{root}/reference.duckdb``   one table per non-date-scoped master/reference
-  table (``trade_date``, ``stock_basic``, ``fina_indicator``, ...);
-- ``{root}/{year}/year.duckdb`` one table per date-scoped yearly table
-  (``kline`` incl. multi-day timeframes, ``daily_basic``, ``margin``, ...);
-- ``{root}/{year}/{MMDD}/stock|tradable|index.parquet``  per-day tick volumes
-  (write-once, vendor-native);
-- ``{root}/{year}/{MMDD}/kline.parquet``  that day's vendor daily-bar rows —
-  the raw layer the yearly ``kline`` table is packed from.
+- ``{root}/reference.duckdb``   每个非按日划界的 master/reference 表一张表
+  （``trade_date``、``stock_basic``、``fina_indicator`` 等）；
+- ``{root}/{year}/year.duckdb`` 每个按日划界的年度表一张表
+  （``kline`` 含多日周期、``daily_basic``、``margin`` 等）；
+- ``{root}/{year}/{MMDD}/stock|tradable|index.parquet``  每日 tick 成交量
+  （一次写入，厂商原生格式）；
+- ``{root}/{year}/{MMDD}/kline.parquet``  当日厂商日线 bar 行——年度
+  ``kline`` 表据此打包的原始层。
 
-A template's table is the ``#``-suffixed name (``{year}/year.duckdb#kline``).
-``physical_sources`` is where readers find the data; ``write_targets`` (when
-set) is where the downloader lands raw rows before packing.
+模板的表采用 ``#`` 后缀命名（``{year}/year.duckdb#kline``）。
+``physical_sources`` 是读取方查找数据的位置；``write_targets``（若设置）
+是下载器在打包前落盘原始行的位置。
 
-Unit rules (validated against real data on 2026-09-06):
+单位规则（2026-09-06 对照真实数据校验）：
 
-- kline ``vol`` is in lots (手) -> ``volume`` in shares (x100);
-- kline ``amount`` is in thousand yuan (千元) -> ``turnover`` in yuan (x1000);
-- daily_basic ``total_mv``/``circ_mv`` are in ten-thousand yuan -> yuan (x10000);
-- daily_basic ``total_share``/``float_share``/``free_share`` are in ten-thousand
-  shares -> shares (x10000);
-- per-day tick ``vol`` is an increment in lots for equities (x100 -> shares,
-  cross-checked: sum(vol) == kline vol, price implied 9.29 CNY vs close 9.21);
-  index ticks keep the source-native unit because index quantity has no
-  share-like base (documented, not converted);
-- per-day tick ``amount`` is already yuan (no conversion);
-- ``total_vol`` is the cumulative of ``vol`` per instrument per day
-  (verified 4595/4595 rows), so ``vol`` is the event increment.
+- kline ``vol`` 单位为手 -> ``volume`` 为股（x100）；
+- kline ``amount`` 单位为千元 -> ``turnover`` 为元（x1000）；
+- daily_basic ``total_mv``/``circ_mv`` 单位为万元 -> 元（x10000）；
+- daily_basic ``total_share``/``float_share``/``free_share`` 单位为万股
+  -> 股（x10000）；
+- 每日 tick ``vol`` 对股票为手数增量（x100 -> 股，已交叉校验：
+  sum(vol) == kline vol，隐含价格 9.29 元 vs 收盘 9.21）；指数 tick 保留
+  厂商原生单位，因为指数量没有类似股数的基准（已记录，不做转换）；
+- 每日 tick ``amount`` 已为元（无需转换）；
+- ``total_vol`` 是每个标的每日 ``vol`` 的累计（已验证 4595/4595 行），
+  因此 ``vol`` 是事件增量。
 """
 
 from __future__ import annotations
@@ -56,7 +53,7 @@ LEGACY_BAR_DAY_WRITE = ("{year}/{MMDD}/kline.parquet",)
 
 @dataclass(frozen=True)
 class MigrationMapping:
-    """Auditable mapping from a legacy scope to one release dataset."""
+    """从旧版作用域到某个发布数据集的可审计映射。"""
 
     dataset: str
     status: str
@@ -116,7 +113,7 @@ _YEAR_TABLE = "one parquet file per year, resolved as {root}/{year}/{file}"
 _GLOBAL_TABLE = "one parquet file at {root}/{file}"
 
 MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
-    # -- phase 1: core market chain (implemented) ----------------------------
+    # -- 一期：核心行情链（已实现） ---------------------------------------------
     _mapping(
         "calendar.session",
         "available",
@@ -263,7 +260,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         pit_rule="max(bar available_at, metric available_at)",
         implemented=True,
     ),
-    # -- phase 2: mapped, adapters pending ------------------------------------
+    # -- 二期：已映射，适配器待实现 ---------------------------------------------
     _mapping(
         "market.money_flow",
         "available",
@@ -461,7 +458,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         time_conversion="month -> observation_month",
         pit_rule="publication time not present in source -> contract_only-grade PIT, use conservatively",
     ),
-    # -- contract-only / provisional: no physical source ----------------------
+    # -- 仅契约/临时：无物理数据源 ----------------------------------------------
     _mapping(
         "fundamental.consensus",
         "available",

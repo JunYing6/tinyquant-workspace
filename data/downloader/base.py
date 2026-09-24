@@ -1,29 +1,25 @@
-"""Downloader protocol and raw-volume writer for the workspace layout.
+"""数据域下载器协议与原始卷写入器。
 
-The downloader is the *write* side of the data domain: it pulls raw vendor
-frames and lands them in the exact physical layout that
-``data.adapters.workspace_data`` reads (the layout declared by each
-``MigrationMapping``).  Vendor fields stay vendor-native here; all semantic
-conversion happens in the adapters.
+下载器是数据域的“写”端：拉取原始厂商数据帧，并按
+``data.adapters.workspace_data`` 读取的确切物理布局落盘（该布局由每个
+``MigrationMapping`` 声明）。厂商字段在此保持厂商原生；所有语义转换都在适配器中完成。
 
     vendor API -> Downloader -> raw volume -> Adapter -> DataGateway
 
-The physical layout the writer produces:
+写入器产出的物理布局：
 
-- ``{root}/reference.duckdb``      one table per non-date-scoped table
-- ``{root}/{year}/year.duckdb``    one table per date-scoped yearly table
-- ``{root}/{year}/{MMDD}/*.parquet``  per-day files (tick volumes, daily bars)
+- ``{root}/reference.duckdb``      每个非按日期切分表一张表
+- ``{root}/{year}/year.duckdb``    每个按日期切分的年度表一张表
+- ``{root}/{year}/{MMDD}/*.parquet``  按日文件（分笔成交量、日线）
 
-Templates declare the target as ``{root}/reference.duckdb#trade_date`` or
-``{year}/year.duckdb#daily_basic`` (``#`` names the table); parquet templates
-keep the ``{year}``/``{MMDD}`` path forms.  Repeated writes merge into the
-existing table/file; ``dedup_keys`` selects the business key (keep="last", so
-re-downloads refresh existing rows), while the default deduplicates on the
-full row.
+模板将目标声明为 ``{root}/reference.duckdb#trade_date`` 或
+``{year}/year.duckdb#daily_basic``（``#`` 后为表名）；parquet 模板
+保留 ``{year}``/``{MMDD}`` 路径形式。重复写入会合并进现有表/文件；
+``dedup_keys`` 选定业务键（keep="last"，因此重复下载会刷新既有行），
+默认则按整行去重。
 
-This module also carries the shared plumbing every scope fetcher relies on:
-month iteration, exponential-backoff retries and offset pagination (all
-ported from the legacy workspace downloader infra).
+本模块还承载所有 scope 拉取器依赖的公共设施：月份迭代、
+指数退避重试与 offset 分页（全部移植自旧版工作区下载器基建）。
 """
 
 from __future__ import annotations
@@ -49,21 +45,21 @@ for _m in MAPPINGS_BY_DATASET.values():
 
 
 def dataset_for_scope(scope: str) -> str | None:
-    """Reverse lookup: legacy scope (e.g. ``trade_data/daily``) -> dataset name."""
+    """反向查找：旧版 scope（如 ``trade_data/daily``）-> 数据集名称。"""
     return _DATASET_BY_SCOPE.get(scope)
 
 
 @runtime_checkable
 class Downloader(Protocol):
-    """A vendor fetcher that returns raw (vendor-native) frames."""
+    """返回原始（厂商原生）数据帧的厂商拉取器。"""
 
     def fetch(self, scope: str, start: str, end: str) -> pd.DataFrame:
-        """Fetch ``scope`` rows for the inclusive YYYYMMDD range."""
+        """拉取 ``scope`` 在闭区间 YYYYMMDD 范围内的行。"""
         ...
 
 
 # ---------------------------------------------------------------------------
-# shared plumbing (ported from the legacy downloader infra)
+# 公共设施（移植自旧版下载器基建）
 # ---------------------------------------------------------------------------
 
 def retry_call(
@@ -75,7 +71,7 @@ def retry_call(
     base_sleep: float = 2.0,
     **kwargs: Any,
 ) -> Any:
-    """Call a vendor API with exponential-backoff retries; ``None`` when exhausted."""
+    """调用厂商 API，带指数退避重试；重试耗尽时返回 ``None``。"""
     if logger is None:
         logger = logging.getLogger(__name__)
     for attempt in range(max_retries + 1):
@@ -103,7 +99,7 @@ def fetch_with_pagination(
     sleep_between: float = 0.1,
     label: str = "",
 ) -> pd.DataFrame:
-    """Offset-pagination fetch: walks ``offset`` until the vendor returns a short page."""
+    """Offset 分页拉取：递增 ``offset``，直到厂商返回不足以满页的数据为止。"""
     params = dict(params or {})
     all_rows: list[pd.DataFrame] = []
 
@@ -137,7 +133,7 @@ def fetch_with_pagination(
 
 
 def iter_months(start_date: str, end_date: str) -> Iterator[str]:
-    """Yield ``YYYYMM`` strings covering the inclusive YYYYMMDD range."""
+    """产出覆盖闭区间 YYYYMMDD 范围的 ``YYYYMM`` 字符串。"""
     s = datetime.strptime(start_date, "%Y%m%d")
     e = datetime.strptime(end_date, "%Y%m%d")
     cur = datetime(s.year, s.month, 1)
@@ -151,7 +147,7 @@ def iter_months(start_date: str, end_date: str) -> Iterator[str]:
 
 
 def get_month_range(ym: str, end_date: str) -> tuple[str, str]:
-    """Clamp month ``ym`` (``YYYYMM``) against ``end_date``; returns (start, end) YYYYMMDD."""
+    """将月份 ``ym``（``YYYYMM``）按 ``end_date`` 裁剪；返回 (start, end) 的 YYYYMMDD。"""
     month_start = ym + "01"
     if ym == end_date[:6]:
         month_end = end_date
@@ -166,7 +162,7 @@ def get_month_range(ym: str, end_date: str) -> tuple[str, str]:
 
 
 def quarter_end_dates(start_date: str, end_date: str) -> list[str]:
-    """Report-period end dates (0331/0630/0930/1231) inside the inclusive range."""
+    """闭区间内的报告期截止日期（0331/0630/0930/1231）。"""
     start = datetime.strptime(start_date, "%Y%m%d")
     end = datetime.strptime(end_date, "%Y%m%d")
     month_ends = {3: (3, 31), 6: (6, 30), 9: (9, 30), 12: (12, 31)}
@@ -181,7 +177,7 @@ def quarter_end_dates(start_date: str, end_date: str) -> list[str]:
 
 
 def report_periods(start_date: str, end_date: str) -> list[str]:
-    """Report periods (``YYYYMMDD`` quarter ends) for the VIP-period APIs, as strings."""
+    """供 VIP 周期类 API 使用的报告期（``YYYYMMDD`` 季度末），以字符串形式返回。"""
     quarters = ("0331", "0630", "0930", "1231")
     periods = [
         yq
@@ -196,7 +192,7 @@ def report_periods(start_date: str, end_date: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# duckdb table IO
+# duckdb 表读写
 # ---------------------------------------------------------------------------
 
 
@@ -214,7 +210,7 @@ def read_duckdb_table(
     table: str,
     columns: Sequence[str] | None = None,
 ) -> pd.DataFrame:
-    """Read one table from a duckdb file into a pandas frame."""
+    """从 duckdb 文件读取一张表到 pandas 数据帧。"""
     con = duckdb.connect(str(db_path), read_only=True)
     try:
         projection = ", ".join(f'"{c}"' for c in columns) if columns else "*"
@@ -230,11 +226,11 @@ def merge_duckdb_table(
     dedup_keys: Sequence[str] | None = None,
     dedupe: bool = True,
 ) -> int:
-    """Merge ``frame`` into ``table`` (business-key dedupe, keep last); returns row count.
+    """将 ``frame`` 合并进 ``table``（按业务键去重，保留最后一条）；返回行数。
 
-    The whole table is rewritten atomically per call: read existing rows,
-    concat + dedupe, then ``CREATE OR REPLACE TABLE``.  The connection is
-    opened and closed per call so readers are only blocked for the rewrite.
+    每次调用整个表原子重写：读取已有行、拼接并去重，然后执行
+    ``CREATE OR REPLACE TABLE``。连接按次打开与关闭，因此读者仅在
+    重写期间被阻塞。
     """
     if frame.empty:
         return 0
@@ -265,17 +261,17 @@ def merge_duckdb_table(
 
 @dataclass(frozen=True)
 class WriteTarget:
-    """A parsed physical write target."""
+    """一个已解析的物理写入目标。"""
 
-    kind: str  # "parquet" | "duckdb"
-    scoped: str  # "year" | "root"
-    template: str  # original template, e.g. "{year}/year.duckdb#kline"
-    per_day: bool  # parquet only: {MMDD} path form
-    table: str | None  # duckdb only
+    kind: str  # 取值："parquet" | "duckdb"
+    scoped: str  # 取值："year" | "root"
+    template: str  # 原始模板，如 "{year}/year.duckdb#kline"
+    per_day: bool  # 仅 parquet：{MMDD} 路径形式
+    table: str | None  # 仅 duckdb
 
 
 def parse_target(template: str) -> WriteTarget:
-    """Parse a write-template string into its kind/scope/table parts."""
+    """将写模板字符串解析为 kind/scope/table 各部分。"""
     if "#" in template:
         path, table = template.split("#", 1)
         return WriteTarget(kind="duckdb", scoped="root" if "{root}" in template else "year",
@@ -290,24 +286,22 @@ def parse_target(template: str) -> WriteTarget:
 
 
 # ---------------------------------------------------------------------------
-# raw volume writer
+# 原始卷写入器
 # ---------------------------------------------------------------------------
 
 
 class RawVolumeWriter:
-    """Lands raw frames into the legacy workspace layout under ``root``.
+    """将原始数据帧落盘到 ``root`` 下的旧版工作区布局。
 
-    Target paths/tables are resolved from the dataset's ``MigrationMapping``
-    (``write_targets`` first, then ``physical_sources``), so the writer and the
-    readers stay aligned by construction:
+    目标路径/表从数据集的 ``MigrationMapping`` 解析（先取 ``write_targets``，
+    再取 ``physical_sources``），因此写入器与读者在结构上保持一致：
 
-    - ``{root}/reference.duckdb#trade_date``   global snapshot tables
-    - ``{year}/year.duckdb#daily_basic``       date-scoped yearly tables
-    - ``{year}/{MMDD}/kline.parquet``          rows grouped by trading day
+    - ``{root}/reference.duckdb#trade_date``   全局快照表
+    - ``{year}/year.duckdb#daily_basic``       按日期切分的年度表
+    - ``{year}/{MMDD}/kline.parquet``          按交易日分组的行
 
-    Repeated writes merge into the existing table/file; ``dedup_keys`` selects
-    the business key (keep="last", so re-downloads refresh existing rows),
-    while the default deduplicates on the full row.
+    重复写入会合并进现有表/文件；``dedup_keys`` 选定业务键（keep="last"，
+    因此重复下载会刷新既有行），默认则按整行去重。
     """
 
     def __init__(self, root: str | Path) -> None:
@@ -326,7 +320,7 @@ class RawVolumeWriter:
         dedup_keys: Sequence[str] | None = None,
         dedupe: bool = True,
     ) -> list[Path]:
-        """Write a raw frame for ``scope`` and return the touched file paths."""
+        """为 ``scope`` 写入一个原始数据帧，并返回所受影响的文件路径。"""
         dataset = dataset_for_scope(scope)
         if dataset is None:
             raise ValueError(f"unknown legacy scope {scope!r} (no MigrationMapping)")
@@ -373,12 +367,12 @@ class RawVolumeWriter:
             )
         return self._write_year_frames(target, frame, date_column, keys, dedupe)
 
-    # -- internals ----------------------------------------------------------
+    # -- 内部方法 ------------------------------------------------------------
 
     @staticmethod
     def _write_template(dataset: str, mapping: Any) -> str | None:
         candidates = tuple(mapping.write_targets) or tuple(mapping.physical_sources)
-        # per-day parquet first, then yearly, then root-scoped
+        # 优先按日 parquet，再按年，最后 root 级
         for template in candidates:
             if "{MMDD}" in template:
                 return template

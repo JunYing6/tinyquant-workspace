@@ -1,9 +1,8 @@
-"""Shared data IO and market-calendar helpers for the workspace adapters.
+"""工作区适配器共享的数据 IO 与交易日历辅助工具。
 
-Sources are the consolidated volume layout: duckdb tables for yearly/global
-data (``{year}/year.duckdb#kline``, ``{root}/reference.duckdb#stock_basic``,
-...) and per-day parquet for the tick volumes.  All conversions follow
-``adapters/workspace_data/mappings.py``.
+数据源是整合后的数据卷布局：年度/全局数据用 duckdb 表
+（``{year}/year.duckdb#kline``、``{root}/reference.duckdb#stock_basic`` 等），
+tick 成交量用每日 parquet。所有转换遵循 ``adapters/workspace_data/mappings.py``。
 """
 
 from __future__ import annotations
@@ -15,7 +14,7 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
-CST = timezone(timedelta(hours=8))  # China Standard Time, no DST
+CST = timezone(timedelta(hours=8))  # 中国标准时间，无夏令时
 MARKET = "CN"
 SESSION_OPEN = time(9, 30)
 SESSION_CLOSE = time(15, 0)
@@ -28,7 +27,7 @@ YEAR_DB = "year.duckdb"
 
 
 def session_bounds(trading_date: date) -> tuple[datetime, datetime]:
-    """Return the (inclusive) session open and close datetimes in CST."""
+    """返回（包含边界的）CST 会话开盘与收盘时间。"""
     return (
         datetime.combine(trading_date, SESSION_OPEN, tzinfo=CST),
         datetime.combine(trading_date, SESSION_CLOSE, tzinfo=CST),
@@ -36,7 +35,7 @@ def session_bounds(trading_date: date) -> tuple[datetime, datetime]:
 
 
 def announcement_close(announcement: date) -> datetime:
-    """Conservative PIT rule: date-level announcements become visible at session close."""
+    """保守 PIT 规则：日级公告在收盘时方可可见。"""
     return datetime.combine(announcement, SESSION_CLOSE, tzinfo=CST)
 
 
@@ -58,7 +57,7 @@ def parse_yyyymmdd(value: object) -> date | None:
 
 
 def resolve_year_files(root: Path, filename: str, start: date | None, end: date | None) -> list[Path]:
-    """Resolve ``{root}/{year}/{filename}`` files covering the requested range."""
+    """解析覆盖请求区间的一系列 ``{root}/{year}/{filename}`` 文件。"""
     if not root.is_dir():
         raise FileNotFoundError(f"workspace data root does not exist: {root}")
     year_dirs = sorted(int(p.name) for p in root.iterdir() if p.is_dir() and p.name.isdigit())
@@ -83,12 +82,12 @@ def resolve_year_files(root: Path, filename: str, start: date | None, end: date 
 
 
 def resolve_year_dbs(root: Path, start: date | None, end: date | None) -> list[Path]:
-    """Resolve ``{root}/{year}/year.duckdb`` files covering the requested range."""
+    """解析覆盖请求区间的一系列 ``{root}/{year}/year.duckdb`` 文件。"""
     return resolve_year_files(root, YEAR_DB, start, end)
 
 
 def read_frame(path: Path, columns: list[str] | None = None) -> pd.DataFrame:
-    """Read one parquet file into a pandas frame (pyarrow backend)."""
+    """读取单个 parquet 文件为 pandas DataFrame（pyarrow 后端）。"""
     return pd.read_parquet(path, columns=columns)
 
 
@@ -99,7 +98,7 @@ def read_table(
     where: str | None = None,
     params: list | None = None,
 ) -> pd.DataFrame:
-    """Read one table from a duckdb file (read-only, connection per call)."""
+    """从 duckdb 文件读取单张表（只读，每次调用独立连接）。"""
     if not db_path.is_file():
         raise FileNotFoundError(f"duckdb data file not found: {db_path}")
     projection = ", ".join(f'"{c}"' for c in columns) if columns else "*"
@@ -114,7 +113,7 @@ def read_table(
 
 
 def table_exists(db_path: Path, table: str) -> bool:
-    """Whether ``table`` exists in the duckdb file at ``db_path``."""
+    """``table`` 是否存在于 ``db_path`` 处的 duckdb 文件中。"""
     if not db_path.is_file():
         return False
     con = duckdb.connect(str(db_path), read_only=True)
@@ -130,7 +129,7 @@ def table_exists(db_path: Path, table: str) -> bool:
 
 
 def source_revision(paths: list[Path]) -> str:
-    """Stable data revision: md5 over (relative name, size, mtime) of the sources."""
+    """稳定数据版本：对数据源的（相对名称、大小、mtime）计算 md5。"""
     digest = hashlib.md5()
     for path in sorted(paths, key=lambda p: str(p)):
         stat = path.stat()
@@ -139,9 +138,9 @@ def source_revision(paths: list[Path]) -> str:
 
 
 def date_range_days(start: datetime | date | None, end: datetime | date | None) -> list[date]:
-    """Days covered by a half-open [start, end) request window.
+    """半开区间 [start, end) 请求窗口覆盖的交易日。
 
-    ``end`` is exclusive: a midnight end excludes the end day itself.
+    ``end`` 为排除边界：午夜 end 会排除 end 当天本身。
     """
     if start is None or end is None:
         raise ValueError("both start and end are required to resolve day files")

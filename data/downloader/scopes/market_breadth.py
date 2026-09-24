@@ -1,11 +1,9 @@
-"""Market breadth aggregator (legacy scope ``trade_data/breadth``).
+"""市场宽度聚合器（旧作用域 ``trade_data/breadth``）。
 
-Derived scope, kept in the downloader only because the legacy volume stores it
-that way: it reads the already-downloaded daily bar files
-(``{year}/{MMDD}/kline.parquet``) from the raw volume and aggregates per-day
-up/down/total traded amount into the ``{year}/year.duckdb`` table
-``market_breadth``.  No vendor call happens here; the amounts are sums of the
-kline ``amount`` column in its vendor unit (no conversion).
+派生作用域，之所以放在下载器中只是因为旧卷就是这样存储的：它从原始卷读取已下载好的日线
+K 线文件（``{year}/{MMDD}/kline.parquet``），按日把上涨/下跌/总成交金额聚合成
+``{year}/year.duckdb`` 表的 ``market_breadth``。此处没有厂商调用；金额是 K 线 ``amount`` 列
+按其厂商单位的求和（不做换算）。
 """
 
 from __future__ import annotations
@@ -27,7 +25,7 @@ def fetch_market_breadth(
     data_root: str | Path | None = None,
     **options: Any,
 ) -> pd.DataFrame:
-    """Aggregate market breadth from the raw daily bar files (client unused)."""
+    """从原始日线 K 线文件聚合市场宽度（不使用客户端）。"""
     if data_root is None:
         raise ValueError(
             "trade_data/breadth reads the already-downloaded bar volume; "

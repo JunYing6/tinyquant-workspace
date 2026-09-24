@@ -1,8 +1,7 @@
-"""Cashflow statement fetcher (legacy scope ``fina/cashflow_report``).
+"""现金流量表获取器（旧作用域 ``fina/cashflow_report``）。
 
-Calls the vendor ``cashflow_vip`` interface per report period with offset
-pagination and lands the raw rows at ``{root}/cashflow_report.parquet``
-(global table, deduplicated on ``ts_code``+``end_date``+``ann_date``).
+按报告期调用厂商 ``cashflow_vip`` 接口，使用 offset 分页，将原始行写入
+``{root}/cashflow_report.parquet``（全局表，按 ``ts_code``+``end_date``+``ann_date`` 去重）。
 """
 
 from __future__ import annotations
@@ -54,7 +53,7 @@ def fetch_cashflow(
     sleep: float = 0.3,
     **options: Any,
 ) -> pd.DataFrame:
-    """Fetch quarterly cashflow statements for every report period in the range."""
+    """按区间内的每个报告期拉取季度现金流量表。"""
     periods = report_periods(start, end)
     logger.info("[cashflow] 报告期列表: %s", periods)
 

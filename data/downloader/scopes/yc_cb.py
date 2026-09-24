@@ -1,9 +1,8 @@
-"""Government bond yield-curve fetcher (legacy scope ``trade_data/yc_cb``).
+"""国债收益率曲线获取器（旧作用域 ``trade_data/yc_cb``）。
 
-Calls the vendor ``yc_cb`` interface in small batches (one call returns only a
-few trading days), keeps the requested ``curve_term`` rows and lands them at
-``{year}/yc_cb.parquet`` (``trade_date``/``ts_code``/``curve_name``/
-``curve_type``/``curve_term``/``yield``, vendor percentage points).
+以小组批量调用厂商 ``yc_cb`` 接口（单次调用只返回少数几个交易日），保留请求的 ``curve_term`` 行，
+写入 ``{year}/yc_cb.parquet``（``trade_date``/``ts_code``/``curve_name``/``curve_type``/``curve_term``/``yield``，
+厂商百分点单位）。
 """
 
 from __future__ import annotations
@@ -26,7 +25,7 @@ def fetch_yc_cb(
     calendar: Callable[[str, str], list[str]] | None = None,
     **options: Any,
 ) -> pd.DataFrame:
-    """Fetch bond yield-curve rows for the configured curve in trading-day batches."""
+    """按交易日小批量拉取配置曲线的债券收益率曲线行。"""
     if calendar is None:
         raise ValueError("trade_data/yc_cb needs a calendar provider (injected or vendor)")
     trade_dates = calendar(start, end)

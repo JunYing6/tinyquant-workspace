@@ -1,9 +1,8 @@
-"""Block-trade fetcher (legacy scope ``event/block_trade``).
+"""大宗交易获取器（旧作用域 ``event/block_trade``）。
 
-Calls the vendor ``block_trade`` interface once per trading day and lands the
-raw rows at ``{year}/block_trade.parquet`` (deduplicated on
-``ts_code``+``trade_date``).  ``vol`` stays in vendor lots and ``amount`` in
-vendor thousand-yuan; conversions live in the adapters.
+按每个交易日调用厂商 ``block_trade`` 接口一次，将原始行写入
+``{year}/block_trade.parquet``（按 ``ts_code``+``trade_date`` 去重）。
+``vol`` 保留厂商的手数单位，``amount`` 保留厂商的千元单位；单位换算放在适配层。
 """
 
 from __future__ import annotations
@@ -28,7 +27,7 @@ def fetch_block_trade(
     calendar: Callable[[str, str], list[str]] | None = None,
     **options: Any,
 ) -> pd.DataFrame:
-    """Fetch block trades for every trading day in the range."""
+    """按区间内的每个交易日拉取大宗交易数据。"""
     if calendar is None:
         raise ValueError("event/block_trade needs a calendar provider (injected or vendor)")
     max_retries = options.get("max_retries", 3)

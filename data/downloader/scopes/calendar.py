@@ -1,10 +1,8 @@
-"""Trading calendar fetcher (legacy scope ``calendar/trade_cal``).
+"""交易日历获取器（旧作用域 ``calendar/trade_cal``）。
 
-Calls the vendor ``trade_cal`` interface and lands the raw frame at
-``{root}/trade_date.parquet`` (columns ``cal_date``/``is_open``), the calendar
-table every other scope and the workspace adapters rely on.  This scope doubles
-as the default trading-date source for scopes that iterate trading days when
-no calendar provider is injected.
+调用厂商 ``trade_cal`` 接口，将原始表写入 ``{root}/trade_date.parquet``
+（列为 ``cal_date``/``is_open``），这是其他作用域和工作区适配器依赖的日历表。
+当未注入日历提供者时，本作用域兼作按交易日迭代的作用域的默认交易日来源。
 """
 
 from __future__ import annotations
@@ -27,7 +25,7 @@ def fetch_trade_cal(
     sleep: float = 0.0,
     **options: Any,
 ) -> pd.DataFrame:
-    """Fetch the exchange calendar for the inclusive YYYYMMDD range (vendor-native)."""
+    """拉取闭区间 YYYYMMDD 范围内的交易所日历（厂商原生接口）。"""
     df = client.trade_cal(
         exchange=options.get("exchange", "SSE"),
         start_date=start,
@@ -37,7 +35,7 @@ def fetch_trade_cal(
     if df is None or df.empty:
         logger.warning("[trade_cal] %s~%s 无数据", start, end)
         return pd.DataFrame()
-    # vendor returns string dates / '0'-'1' flags; keep them string-typed
+    # 厂商返回字符串日期 / '0'-'1' 标志；保持其字符串类型
     df = df.copy()
     df["cal_date"] = df["cal_date"].astype(str)
     df["is_open"] = df["is_open"].astype(str)
@@ -45,7 +43,7 @@ def fetch_trade_cal(
 
 
 def fetch_vendor_trade_dates(client: Any, start: str, end: str) -> list[str]:
-    """Resolve open trading dates via the vendor calendar (default calendar source)."""
+    """通过厂商日历解析开放交易日（默认日历来源）。"""
     df = fetch_trade_cal(client, start, end)
     if df.empty:
         raise ValueError(
@@ -57,11 +55,10 @@ def fetch_vendor_trade_dates(client: Any, start: str, end: str) -> list[str]:
 
 
 def naive_calendar_days(start: str, end: str) -> list[str]:
-    """Every calendar day in the range (fallback when no calendar source exists).
+    """区间内的每个日历日（当不存在日历来源时的回退方案）。
 
-    Vendor per-day interfaces return empty frames for non-trading days, so the
-    extra calls are wasted but harmless; inject a trade_dates_provider or use
-    a client with ``trade_cal`` for efficient trading-day iteration.
+    厂商按日接口在非交易日会返回空表，多出的调用虽有浪费但无害；可注入
+    trade_dates_provider，或使用带 ``trade_cal`` 的客户端以高效地按交易日迭代。
     """
     from datetime import date, timedelta
 

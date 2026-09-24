@@ -1,9 +1,8 @@
-"""Income statement fetcher (legacy scope ``fina/income_report``).
+"""利润表获取器（旧作用域 ``fina/income_report``）。
 
-Calls the vendor ``income_vip`` interface per report period with offset
-pagination and lands the raw rows at ``{root}/income_report.parquet`` (global
-table, deduplicated on ``ts_code``+``end_date``+``ann_date``).  Amounts stay
-in vendor yuan; ``f_ann_date``-vs-``ann_date`` PIT fallback is an adapter rule.
+按报告期调用厂商 ``income_vip`` 接口，使用 offset 分页，将原始行写入
+``{root}/income_report.parquet``（全局表，按 ``ts_code``+``end_date``+``ann_date`` 去重）。
+金额保持厂商的元单位；``f_ann_date`` 与 ``ann_date`` 之间的 PIT 回退是适配层规则。
 """
 
 from __future__ import annotations
@@ -42,7 +41,7 @@ def fetch_income(
     sleep: float = 0.3,
     **options: Any,
 ) -> pd.DataFrame:
-    """Fetch quarterly income statements for every report period in the range."""
+    """按区间内的每个报告期拉取季度利润表。"""
     periods = report_periods(start, end)
     logger.info("[income] 报告期列表: %s", periods)
 

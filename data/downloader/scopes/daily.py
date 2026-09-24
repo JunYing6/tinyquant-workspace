@@ -1,19 +1,18 @@
-"""Daily bars + daily metrics fetcher (legacy scope ``trade_data/daily``).
+"""日线 K 线 + 日频指标获取器（旧作用域 ``trade_data/daily``）。
 
-The legacy workspace fetched one merged frame per trading day (bars + status
-flags + valuation fields) from eight vendor interfaces; the on-disk layout
-splits it into two yearly files, and this fetcher returns the same split as a
-dict so each half lands in its mapped layout:
+旧工作区从八个厂商接口拉取每个交易日的合并表（K 线 + 状态标志 + 估值字段）；
+磁盘布局将其拆为两个年度文件，本获取器以字典形式返回同样拆分后的结果，
+使两半数据分别落入其映射的布局：
 
 - ``market.bar``          -> ``{year}/kline.parquet``
-  (``ts_code, trade_date, open, high, low, close, pre_close, pct_chg, vol,
-  amount, adj_factor, name, data_type, timeframe, change`` — vendor fields
-  plus the two layout tags ``data_type='stock'``/``timeframe='1d'``)
+  （``ts_code, trade_date, open, high, low, close, pre_close, pct_chg, vol,
+  amount, adj_factor, name, data_type, timeframe, change`` —— 厂商字段
+  外加两个布局标签 ``data_type='stock'``/``timeframe='1d'``）
 - ``market.daily_metric`` -> ``{year}/daily_basic.parquet``
-  (``is_st``/``is_suspended``/``limit`` flags and the ``daily_basic``
-  valuation fields, vendor-native)
+  （``is_st``/``is_suspended``/``limit`` 标志及 ``daily_basic``
+  估值字段，厂商原生）
 
-Unit conversions (lots->shares, thousand-yuan->yuan) happen in the adapters.
+单位换算（手->股、千元->元）发生在适配层。
 """
 
 from __future__ import annotations
@@ -58,7 +57,7 @@ def fetch_daily(
     calendar: Callable[[str, str], list[str]] | None = None,
     **options: Any,
 ) -> dict[str, pd.DataFrame]:
-    """Fetch per-trading-day vendor frames; returns kline/daily_basic frames."""
+    """按交易日拉取厂商表；返回 kline/daily_basic 两个表。"""
     if calendar is None:
         raise ValueError("trade_data/daily needs a calendar provider (injected or vendor)")
     trade_dates = calendar(start, end)
@@ -77,7 +76,7 @@ def fetch_daily(
         if basic is not None and not basic.empty:
             basic_frames.append(basic)
         if index % 20 == 0 and sleep > 0:
-            time.sleep(max(sleep, 0.5))  # vendor rate limit: burst of 20 calls
+            time.sleep(max(sleep, 0.5))  # 厂商限流：20 次调用为一组突发
         elif sleep > 0:
             time.sleep(sleep)
 
@@ -104,13 +103,13 @@ def _download_single_day(
         return df if df is not None else pd.DataFrame()
 
     def optional(method: str, label: str, **kwargs: Any) -> pd.DataFrame:
-        """Optional enrichment interface: skip silently when the client lacks it."""
+        """可选增强接口：当客户端缺少该方法时静默跳过。"""
         fn = getattr(client, method, None)
         if fn is None:
             return pd.DataFrame()
         return call(fn, label, **kwargs)
 
-    # ---- kline half: bars + names + adjustment factor -----------------------
+    # ---- kline 一半：K 线 + 名称 + 复权因子 -----------------------
     kline = call(
         client.daily,
         f"daily {date}",
@@ -132,7 +131,7 @@ def _download_single_day(
     kline["timeframe"] = "1d"
     kline = _finalize(kline, date, KLINE_COLUMNS)
 
-    # ---- daily_basic half: status flags + valuation fields ------------------
+    # ---- daily_basic 一半：状态标志 + 估值字段 ------------------
     basic = optional(
         "daily_basic",
         f"daily_basic {date}",
@@ -176,7 +175,7 @@ def _download_single_day(
 
 
 def _finalize(frame: pd.DataFrame, date: str, columns: list[str]) -> pd.DataFrame:
-    """Fill the trade date, reindex to the legacy column order, keep vendor values."""
+    """填充交易日期，按旧版列序重新索引，保留厂商值。"""
     frame = frame.copy()
     if "trade_date" in frame.columns:
         frame["trade_date"] = frame["trade_date"].fillna(date)

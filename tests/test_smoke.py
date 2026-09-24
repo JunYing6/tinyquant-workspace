@@ -1,4 +1,4 @@
-"""Smoke tests for the user-side project: adapters, strategy and gateway."""
+"""面向用户侧工程的冒烟测试：适配器、策略与网关。"""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ REAL_VOLUME = Path("E:/ProgramData")
     reason="workspace volume not mounted",
 )
 def test_gateway_assembles_and_runs_backtest() -> None:
-    """The real-gateway smoke path: main.build_gateway over the USB volume."""
+    """真实网关冒烟路径：基于 USB 卷调用 main.build_gateway。"""
     from main import build_gateway
 
     gateway = build_gateway()

@@ -1,13 +1,10 @@
-"""Moneyflow fetcher (legacy scope ``trade_data/moneyflow``).
+"""资金流向获取器（旧作用域 ``trade_data/moneyflow``）。
 
-Calls the vendor ``moneyflow`` interface per trading day and lands the raw
-rows at ``{year}/moneyflow.parquet`` (deduplicated on ``trade_date`` +
-``ts_code``).  Vendor fields stay raw.
+按每个交易日调用厂商 ``moneyflow`` 接口，将原始行写入 ``{year}/moneyflow.parquet``
+（按 ``trade_date``+``ts_code`` 去重）。厂商字段保持原样。
 
-Note: the legacy downloader additionally derived ``total_amount`` /
-``net_pct_main`` columns; that enrichment is a second-order aggregation and now
-belongs to the processing layer, so the downloader writes the vendor columns
-only (the ``market.money_flow`` mapping declares just the vendor fields).
+注意：旧下载器额外派生了 ``total_amount``/``net_pct_main`` 列；这种增强属于二阶聚合，
+现归处理层所有，因此下载器只写厂商列（``market.money_flow`` 映射也只声明厂商字段）。
 """
 
 from __future__ import annotations
@@ -31,7 +28,7 @@ def fetch_moneyflow(
     calendar: Callable[[str, str], list[str]] | None = None,
     **options: Any,
 ) -> pd.DataFrame:
-    """Fetch per-stock moneyflow rows for every trading day in the range."""
+    """按区间内的每个交易日拉取个股资金流向行。"""
     if calendar is None:
         raise ValueError("trade_data/moneyflow needs a calendar provider (injected or vendor)")
     max_retries = options.get("max_retries", 3)

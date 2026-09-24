@@ -1,16 +1,15 @@
-"""Tushare (and legacy non-Tushare) scope registry and the download facade.
+"""Tushare（及旧版非 Tushare）scope 注册表与下载门面。
 
-The registry maps every legacy scope declared by
-``data.adapters.workspace_data.mappings`` to a :class:`ScopeSpec`:
+注册表将 ``data.adapters.workspace_data.mappings`` 声明的每个旧版 scope
+映射到 :class:`ScopeSpec`：
 
     scope key -> fetcher(client, start, end, **options) -> raw frame(s)
 
-Fetchers return vendor-native frames (no renaming, no unit conversion — the
-rules live in the ``MigrationMapping``); ``TushareDownloader.download`` lands
-them in the mapped physical layout via ``RawVolumeWriter`` (duckdb tables for
-yearly/global data, per-day parquet for daily bars and tick volumes).  The
-client is always injected by the caller — nothing here reads tokens or
-credentials::
+拉取器返回厂商原生数据帧（不做重命名、不做单位转换——规则存在于
+``MigrationMapping`` 中）；``TushareDownloader.download`` 通过
+``RawVolumeWriter`` 将它们落到映射的物理布局（年度/全局数据用 duckdb 表，
+日线与分笔量用按日 parquet）。客户端始终由调用方注入——此处不读取任何
+令牌或凭据::
 
     import tushare as ts
     from config import secrets
@@ -18,9 +17,8 @@ credentials::
     downloader = TushareDownloader(client=client, root="E:/ProgramData")
     downloader.download("trade_data/daily", "20240102", "20241231")
 
-Scopes that need trading days resolve them from the injected
-``trade_dates_provider`` or, by default, from the vendor ``trade_cal``
-interface itself (see ``scopes.calendar``).
+需要交易日的 scope 从注入的 ``trade_dates_provider`` 解析，或默认从厂商
+``trade_cal`` 接口本身解析（见 ``scopes.calendar``）。
 """
 
 from __future__ import annotations
@@ -67,29 +65,28 @@ from data.downloader.scopes import (
 
 from data.downloader import tick_import
 
-# fetchers receive: (client, start, end, *, sleep, calendar, data_root, **options)
+# 拉取器接收: (client, start, end, *, sleep, calendar, data_root, **options)
 FetchFn = Callable[..., Any]
-# custom writers receive: (writer, payload, *, start, end, **options) -> list[Path]
+# 自定义写入器接收: (writer, payload, *, start, end, **options) -> list[Path]
 WriteFn = Callable[..., list]
 DedupKeys = Sequence[str] | Mapping[str, Sequence[str]]
 
 
 @dataclass(frozen=True)
 class ScopeSpec:
-    """Registry entry wiring one legacy scope to its fetch + write contract.
+    """注册表条目，将一个旧版 scope 与其拉取 + 写入契约连接起来。
 
     Attributes:
-        fetch: vendor fetcher returning a raw frame, a dict of
-            ``{dataset_name: frame}`` (multi-dataset scopes), or ``None``
-            (scopes whose work happens entirely in ``write``).
-        date_column: column used to group rows into ``{year}``[/``{MMDD}``]
-            files; ``None`` for global snapshot tables.
-        dedup_keys: business key for merge-dedupe (``keep='last'``), either a
-            column tuple or a per-dataset mapping for multi-dataset scopes.
-            ``None`` deduplicates on the full row.
-        write: optional custom writer overriding the mapping-driven write
-            (used by layouts the ``MigrationMapping`` templates cannot
-            express, e.g. per-day ``index_member`` files).
+        fetch: 厂商拉取器，返回原始数据帧、``{dataset_name: frame}``
+            字典（多数据集 scope），或 ``None``（完全在 ``write`` 中
+            完成工作的 scope）。
+        date_column: 用于将行分组成 ``{year}``[/``{MMDD}``] 文件的列；
+            全局快照表为 ``None``。
+        dedup_keys: 合并去重的业务键（``keep='last'``），可为列元组，
+            也可用于多数据集 scope 的按数据集映射。``None`` 表示整行去重。
+        write: 可选的自定义写入器，覆盖由映射驱动的写入（用于
+            ``MigrationMapping`` 模板无法表达的布局，例如按日的
+            ``index_member`` 文件）。
     """
 
     fetch: FetchFn
@@ -100,7 +97,7 @@ class ScopeSpec:
 
 
 _SCOPE_FETCHERS: dict[str, ScopeSpec] = {
-    # -- market ---------------------------------------------------------------
+    # -- 行情 ----------------------------------------------------------------
     "trade_data/daily": ScopeSpec(
         fetch=daily.fetch_daily,
         dedup_keys={
@@ -176,7 +173,7 @@ _SCOPE_FETCHERS: dict[str, ScopeSpec] = {
         write=index_member.write_index_member,
         description="index constituent weights -> {year}/{MMDD}/index_member.parquet",
     ),
-    # -- reference ------------------------------------------------------------
+    # -- 参考数据 -------------------------------------------------------------
     "calendar/trade_cal": ScopeSpec(
         fetch=calendar.fetch_trade_cal,
         date_column=None,
@@ -195,7 +192,7 @@ _SCOPE_FETCHERS: dict[str, ScopeSpec] = {
         dedup_keys=None,
         description="SW L1 membership -> {root}/sw_industry.parquet",
     ),
-    # -- fundamentals -----------------------------------------------------------
+    # -- 基本面 ---------------------------------------------------------------
     "fina/indicator": ScopeSpec(
         fetch=fina.fetch_fina_indicator,
         date_column=None,
@@ -233,7 +230,7 @@ _SCOPE_FETCHERS: dict[str, ScopeSpec] = {
         dedup_keys=("fund_code", "end_date", "ts_code"),
         description="fund top holdings -> {root}/fund_portfolio.parquet",
     ),
-    # -- events -----------------------------------------------------------------
+    # -- 事件 ------------------------------------------------------------------
     "event/forecast": ScopeSpec(
         fetch=forecast.fetch_forecast,
         date_column=None,
@@ -268,7 +265,7 @@ _SCOPE_FETCHERS: dict[str, ScopeSpec] = {
         dedup_keys=("ts_code", "trade_date"),
         description="pledge statistics -> {year}/pledge_stat.parquet",
     ),
-    # -- macro ------------------------------------------------------------------
+    # -- 宏观 ------------------------------------------------------------------
     "macro/indicator": ScopeSpec(
         fetch=macro.fetch_macro,
         date_column=None,
@@ -277,9 +274,8 @@ _SCOPE_FETCHERS: dict[str, ScopeSpec] = {
     ),
 }
 
-# legacy_scope strings that no fetcher can serve, with the reason.  The test
-# suite asserts mappings stay covered: every scope must be registered here or
-# in _SCOPE_FETCHERS.
+# 没有任何拉取器可服务的 legacy_scope 字符串及其原因。测试套件
+# 断言映射保持覆盖：每个 scope 必须在此处或在 _SCOPE_FETCHERS 注册。
 NON_VENDOR_SCOPES: dict[str, str] = {
     "internal/sample": "strategy-internal control channel, rejected by the external gateway",
     "trade_data/daily 的估值与状态字段": "describes the daily_metric half written by trade_data/daily",
@@ -293,7 +289,7 @@ NON_VENDOR_SCOPES: dict[str, str] = {
 
 
 def uncovered_legacy_scopes() -> list[str]:
-    """Legacy scopes from the mappings that have neither a fetcher nor an exemption."""
+    """来自映射、既无拉取器也无豁免的旧版 scope。"""
     from data.adapters.workspace_data.mappings import MAPPINGS_BY_DATASET
 
     known = set(_SCOPE_FETCHERS) | set(NON_VENDOR_SCOPES)
@@ -308,19 +304,18 @@ def uncovered_legacy_scopes() -> list[str]:
 
 
 class TushareDownloader:
-    """Fetch raw vendor frames and land them in the legacy parquet volume.
+    """拉取原始厂商数据帧并落到旧版 parquet 卷。
 
     Args:
-        client: injected vendor SDK client (e.g. ``ts.pro_api(token)``); the
-            downloader never reads credentials itself.
-        root: raw parquet volume root.
-        rate_limit_sleep: seconds between vendor calls (per-scope fetchers
-            interpret it as their per-call / per-batch delay).
-        trade_dates_provider: optional ``callable(start, end) -> list[str]``
-            supplying trading dates; by default the vendor ``trade_cal``
-            interface is used.
-        scope_options: optional per-scope defaults, e.g.
-            ``{"trade_data/minute": {"codes": ["000001.SZ"]}}``.
+        client: 注入的厂商 SDK 客户端（如 ``ts.pro_api(token)``）；下载器
+            自身从不读取凭据。
+        root: 原始 parquet 卷根目录。
+        rate_limit_sleep: 厂商调用的间隔秒数（各 scope 的拉取器
+            将其解释为每次调用 / 每批次的延迟）。
+        trade_dates_provider: 可选 ``callable(start, end) -> list[str]``，
+            提供交易日；默认使用厂商 ``trade_cal`` 接口。
+        scope_options: 可选的按 scope 默认值，如
+            ``{"trade_data/minute": {"codes": ["000001.SZ"]}}``。
     """
 
     def __init__(
@@ -351,7 +346,7 @@ class TushareDownloader:
         return tuple(_SCOPE_FETCHERS)
 
     def fetch(self, scope: str, start: str, end: str, **options: Any) -> Any:
-        """Fetch ``scope`` rows for the inclusive YYYYMMDD range (raw frame(s))."""
+        """拉取 ``scope`` 在闭区间 YYYYMMDD 范围内的行（原始数据帧）。"""
         spec = _require_spec(scope)
         call_options = {
             "sleep": self._rate_limit_sleep,
@@ -372,11 +367,11 @@ class TushareDownloader:
         pack: bool = True,
         **write_kwargs: Any,
     ) -> list[Path]:
-        """Fetch ``scope`` and land it in the mapped layout; returns touched paths.
+        """拉取 ``scope`` 并落到映射布局；返回受影响的路径。
 
-        Daily-bar scopes land per-day ``kline.parquet`` files and then repack
-        the year's ``year.duckdb#kline`` table (1d rows + derived 5d/10d
-        timeframes) unless ``pack=False``.
+        日线类 scope 落成按日 ``kline.parquet`` 文件，随后重新打包
+        该年 ``year.duckdb#kline`` 表（1d 行 + 派生的 5d/10d 周期），
+        除非 ``pack=False``。
         """
         spec = _require_spec(scope)
         payload = self.fetch(scope, start, end, **(options or {}))
@@ -405,7 +400,7 @@ class TushareDownloader:
             self._pack_kline_years(scope, paths)
         return paths
 
-    # -- internals ----------------------------------------------------------
+    # -- 内部方法 ------------------------------------------------------------
 
     def _write_scope(self, scope: str, spec: ScopeSpec, frame: pd.DataFrame, **kwargs: Any) -> list[Path]:
         dedup = spec.dedup_keys if isinstance(spec.dedup_keys, Sequence) and not isinstance(spec.dedup_keys, str) else None
@@ -441,15 +436,15 @@ class TushareDownloader:
             return list(dates)
         if hasattr(self._client, "trade_cal"):
             return calendar.fetch_vendor_trade_dates(self._client, start, end)
-        # minimal client without a calendar interface: fall back to naive
-        # calendar-day iteration (the legacy skeleton behavior)
+        # 无日历接口的最小客户端：退化为朴素的
+        # 日历日遍历（旧版骨架行为）
         return calendar.naive_calendar_days(start, end)
 
     def _pack_kline_years(self, scope: str, paths: list[Path]) -> None:
-        """Repack the yearly kline table after daily-bar scopes touch day files."""
+        """在日线类 scope 改动日文件后重新打包年度 kline 表。"""
         if dataset_for_scope(scope) not in ("market.bar", "index.bar", "fund.bar"):
             return
-        # per-day files live at {year}/{MMDD}/kline.parquet
+        # 按日文件位于 {year}/{MMDD}/kline.parquet
         years = sorted(
             {path.parent.parent.name for path in paths if path.name == "kline.parquet"}
         )

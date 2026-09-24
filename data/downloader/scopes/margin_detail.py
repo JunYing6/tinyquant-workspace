@@ -1,9 +1,8 @@
-"""Per-stock margin detail fetcher (legacy scope ``trade_data/margin_detail``).
+"""个股融资融券明细获取器（旧作用域 ``trade_data/margin_detail``）。
 
-Calls the vendor ``margin_detail`` interface per month with offset pagination
-(5000 rows per page), keeps the raw vendor columns and lands them at
-``{year}/margin.parquet`` with ``level='detail'`` — the per-stock half of the
-same file the summary scope writes.  Amounts/quantities stay in vendor yuan.
+按月调用厂商 ``margin_detail`` 接口，使用 offset 分页（每页 5000 行），保留厂商原始列，写入
+``{year}/margin.parquet`` 并带 ``level='detail'``——这是汇总作用域所写同一文件的个股部分。
+金额/数量保持厂商的元单位。
 """
 
 from __future__ import annotations
@@ -35,7 +34,7 @@ def fetch_margin_detail(
     sleep: float = 0.0,
     **options: Any,
 ) -> pd.DataFrame:
-    """Fetch per-stock margin detail rows for every month in the range."""
+    """按区间内的每个月拉取个股融资融券明细行。"""
     max_retries = options.get("max_retries", 3)
     all_rows: list[pd.DataFrame] = []
 

@@ -1,7 +1,7 @@
-"""Local secrets template.
+"""本地机密模板。
 
-Copy this file to ``config/secrets.py`` and fill in real values.  Do not
-commit ``config/secrets.py``; it is git-ignored.
+将此文件复制为 ``config/secrets.py`` 并填入真实值。请勿提交
+``config/secrets.py``；它已被 git 忽略。
 """
 
 TUSHARE_TOKEN = ""

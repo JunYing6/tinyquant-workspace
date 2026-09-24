@@ -118,7 +118,7 @@ def test_regime_mind_routes_downside_sideways_and_uptrend() -> None:
 
 
 def _two_day_gateway() -> InMemoryGateway:
-    """Minimal hermetic fixture: two sessions, one bar per day."""
+    """最小密封夹具：两个交易日，每天一根K线。"""
     bars, sessions = [], []
     for day in ("20240102", "20240103"):
         close = datetime.strptime(day, "%Y%m%d").replace(hour=15, tzinfo=timezone.utc)

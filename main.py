@@ -1,12 +1,11 @@
-"""User-side entry point for the tinyquant workspace.
+"""tinyquant 工作区的用户侧入口。
 
-Run ``python main.py`` with no arguments to start the ``tq`` CLI workbench
-(interactive REPL); any arguments are forwarded to the CLI.  If the CLI
-(``tinyquant`` installed with the ``[cli]`` extra) is not available,
-``main.py`` falls back to running the dual-ma backtest directly.
+不带参数运行 ``python main.py`` 以启动 ``tq`` CLI 工作台（交互式 REPL）；
+任何参数都会转发给 CLI。如果 CLI（安装带 ``[cli]`` 附加依赖的
+``tinyquant``）不可用，``main.py`` 会回退为直接运行双均线回测。
 
-Backtest factories and the registry live in ``trading_nodes/backtests.py``;
-the data gateway is assembled from ``config/settings.DATA_GATEWAY_FACTORY``.
+回测工厂与注册表位于 ``trading_nodes/backtests.py``；数据网关根据
+``config/settings.DATA_GATEWAY_FACTORY`` 组装。
 """
 
 from __future__ import annotations

@@ -1,27 +1,25 @@
-"""Demonstration: Joel Greenblatt's Magic Formula (神奇公式).
+"""示例：乔尔·格林布莱特的神奇公式（Magic Formula）。
 
-The Magic Formula ranks a candidate universe on two quality/valuation factors
-and holds the top names, rebalanced periodically (Greenblatt suggests a
-12-month hold; this demo uses semi-annual rebalancing).
+神奇公式用一个候选股票池在两个"质量/估值"因子上排序，持有排名靠前的
+标的，并周期性调仓（格林布莱特建议持有 12 个月；本示例采用半年度调仓）。
 
-Factor 1 - Earnings Yield (盈利收益率) = EBIT / EnterpriseValue
+因子一 —— 盈利收益率 = EBIT / 企业价值
     EBIT = operate_profit + fin_exp          (营业利润 + 财务费用)
     EV   = total_mv + st_borr + lt_borr - money_cap
                                     (总市值 + 有息负债 - 货币资金)
-    Higher is better.
+    越高越好。
 
-Factor 2 - Return on Capital (资本回报率) = EBIT / InvestedCapital
-    Implemented with the ``roic`` financial indicator (EBIT / 投入资本),
-    which is Greenblatt's second factor directly.  Higher is better.
+因子二 —— 资本回报率 = EBIT / 投入资本
+    用 ``roic`` 财务指标实现（EBIT / 投入资本），即格林布莱特第二因子的
+    直接体现。越高越好。
 
-Combined score: rank the universe on each factor (descending), sum the two
-ranks, take the lowest ``top_n`` combined ranks, equal-weight them.
+综合得分：在股票池上对每个因子降序排名，两因子排名求和，取综合排名
+之和最小的 ``top_n`` 只，等权持有。
 
-Data requirement: the factors read ``fundamental.report`` (income statement,
-balance sheet, and the ``roic`` indicator) plus ``total_mv`` from
-``market.daily_metric``.  The phase-1 workspace gateway serves market data only;
-wiring in a fundamental adapter makes this runnable end-to-end.  The factor and
-selection math is provider-neutral and is validated by unit tests.
+数据需求：因子读取 ``fundamental.report``（利润表、资产负债表与 ``roic``
+指标），以及来自 ``market.daily_metric`` 的 ``total_mv``。一阶段工作区
+网关只提供行情数据；接入基本面适配器后便可在端到端跑通。因子与选股
+计算是提供者无关的，并由单元测试校验。
 """
 
 from __future__ import annotations

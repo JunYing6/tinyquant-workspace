@@ -1,8 +1,8 @@
-"""Contract tests for the workspace data adapters.
+"""工作区数据适配器的契约测试。
 
-Unit tests build a synthetic parquet volume with the exact legacy layout
-(same columns/units as E:/ProgramData) inside a tmp dir, so no USB drive is
-required.  The real-data smoke test is skipped unless the volume is mounted.
+单元测试在临时目录中构建一个合成 parquet 卷，其布局与旧版完全一致
+（列与单位同 E:/ProgramData），因此无需 USB 驱动器。除非卷已挂载，
+否则真实数据冒烟测试会被跳过。
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ ROOT = "E:/ProgramData"
 
 
 # ---------------------------------------------------------------------------
-# synthetic volume fixture
+# 合成卷夹具
 # ---------------------------------------------------------------------------
 
 def _write(frame: pd.DataFrame, path) -> None:
@@ -53,7 +53,7 @@ def _day_bounds(day: str) -> tuple[datetime, datetime]:
 
 
 # ---------------------------------------------------------------------------
-# mappings
+# 映射
 # ---------------------------------------------------------------------------
 
 
@@ -87,7 +87,7 @@ def test_phase1_datasets_declare_implemented() -> None:
 
 
 # ---------------------------------------------------------------------------
-# calendar
+# 日历
 # ---------------------------------------------------------------------------
 
 
@@ -113,7 +113,7 @@ def test_calendar_include_closed(volume) -> None:
 
 
 # ---------------------------------------------------------------------------
-# bars
+# K线
 # ---------------------------------------------------------------------------
 
 
@@ -127,8 +127,8 @@ def test_bar_unit_conversions_and_view_dispatch(volume) -> None:
     assert set(by_code) == {"000001.SZ", "600000.SH", "000001.SH", "510300.SH"}
 
     bar = by_code["000001.SZ"]
-    assert bar.volume == pytest.approx(11583.66 * 100)  # lots -> shares
-    assert bar.turnover == pytest.approx(107574.22 * 1000)  # thousand-yuan -> yuan
+    assert bar.volume == pytest.approx(11583.66 * 100)  # 手 -> 股
+    assert bar.turnover == pytest.approx(107574.22 * 1000)  # 千元 -> 元
     assert bar.asset_type == "equity"
     assert bar.trading_date == date(2024, 1, 2)
     assert bar.interval_start == datetime(2024, 1, 2, 9, 30, tzinfo=CST)
@@ -137,7 +137,7 @@ def test_bar_unit_conversions_and_view_dispatch(volume) -> None:
 
     index_bar = by_code["000001.SH"]
     assert index_bar.asset_type == "index"
-    assert index_bar.volume == pytest.approx(3041417.93)  # index keeps source-native unit
+    assert index_bar.volume == pytest.approx(3041417.93)  # 指数保留源数据单位
 
     index_view = adapter.read(
         DataRequest(dataset="index.bar", start=start, end=end, frequency="1d")
@@ -175,7 +175,7 @@ def test_bar_instrument_filter_and_empty_range(volume) -> None:
 
 
 # ---------------------------------------------------------------------------
-# daily metric / master / membership
+# 每日指标 / 主表 / 持仓
 # ---------------------------------------------------------------------------
 
 
@@ -187,12 +187,12 @@ def test_daily_metric_conversion_and_pit(volume) -> None:
     )
     rows = {(r["instrument_id"], r["trading_date"]): r for r in batch.records}
     row = rows[("000001.SZ", date(2024, 1, 2))]
-    assert row["total_mv"] == pytest.approx(17872850.0 * 10000)  # wan-yuan -> yuan
-    assert row["total_share"] == pytest.approx(1940592.0 * 10000)  # wan-shares -> shares
+    assert row["total_mv"] == pytest.approx(17872850.0 * 10000)  # 万元 -> 元
+    assert row["total_share"] == pytest.approx(1940592.0 * 10000)  # 万股 -> 股
     assert row["pe_ttm"] == pytest.approx(3.68)
     assert row["available_at"] == datetime(2024, 1, 2, 15, 0, tzinfo=CST)
 
-    # PIT: the day-2 metric is invisible before its own session close
+    # PIT：第 2 天的指标在其自身收盘之前不可见
     early = adapter.read(
         DataRequest(
             dataset="market.daily_metric",
@@ -219,7 +219,7 @@ def test_instrument_master_and_industry(volume) -> None:
 
 
 # ---------------------------------------------------------------------------
-# ticks
+# 逐笔
 # ---------------------------------------------------------------------------
 
 
@@ -234,14 +234,14 @@ def test_tick_trade_and_quote_split(volume) -> None:
             end=end,
         )
     )
-    assert len(trades.records) == 2  # pr == 0 row emits no trade
+    assert len(trades.records) == 2  # pr == 0 的行不产生成交
     first = trades.records[0]
     assert first.price == 9.30
-    assert first.size == pytest.approx(1000 * 100)  # lots -> shares
+    assert first.size == pytest.approx(1000 * 100)  # 手 -> 股
     assert first.turnover == pytest.approx(930000.0)
     assert first.side == "BUY"
     assert first.sequence == 0
-    assert trades.quality.status == "warning"  # synthetic sequence warning
+    assert trades.quality.status == "warning"  # 合成序列警告
     assert trades.quality.warnings[0].code == "SEQUENCE_SYNTHETIC"
 
     quotes = adapter.read(
@@ -252,9 +252,9 @@ def test_tick_trade_and_quote_split(volume) -> None:
             end=end,
         )
     )
-    assert len(quotes.records) == 3  # quote-only row still emits a quote
+    assert len(quotes.records) == 3  # 仅报单行仍会产出报价
     quote_only = quotes.records[1]
-    assert quote_only.last_price is None  # pr == 0 is not a price
+    assert quote_only.last_price is None  # pr == 0 不是价格
     assert quote_only.bid_levels[0].price == 9.28
     assert quote_only.ask_levels[0].price == 9.29
 
@@ -272,12 +272,12 @@ def test_tick_index_trades_keep_source_unit(volume) -> None:
         )
     )
     assert len(batch.records) == 1
-    assert batch.records[0].size == pytest.approx(100.0)  # index keeps source unit
+    assert batch.records[0].size == pytest.approx(100.0)  # 指数保留源数据单位
     assert batch.records[0].asset_type == "index"
 
 
 # ---------------------------------------------------------------------------
-# gateway assembly
+# 网关组装
 # ---------------------------------------------------------------------------
 
 
@@ -324,7 +324,7 @@ def test_snapshot_composite_joins_bar_and_metric(volume) -> None:
 
 
 # ---------------------------------------------------------------------------
-# real-data smoke test (runs only when the USB volume is mounted)
+# 真实数据冒烟测试（仅在 USB 卷已挂载时运行）
 # ---------------------------------------------------------------------------
 
 
@@ -360,8 +360,8 @@ def test_real_volume_bar_matches_known_values() -> None:
 @requires_volume
 def test_real_volume_tick_cross_check() -> None:
     adapter = WorkspaceTickAdapter(ROOT)
-    # full-day bounds (midnight -> next midnight) so the whole day file is covered,
-    # including the 09:15-09:30 auction window
+    # 全天边界（午夜 -> 次日午夜）以覆盖整个日文件，
+    # 包括 09:15-09:30 集合竞价窗口
     start = datetime(2024, 1, 2, 0, 0, tzinfo=CST)
     end = datetime(2024, 1, 3, 0, 0, tzinfo=CST)
     trades = adapter.read(
@@ -372,9 +372,9 @@ def test_real_volume_tick_cross_check() -> None:
             end=end,
         )
     )
-    # 4595 rows in the file; 65 are quote-only snapshots with pr == 0
+    # 文件中 4595 行；其中 65 行是 pr == 0 的仅报单快照
     assert len(trades.records) == 4530
-    assert sum(t.size for t in trades.records) == pytest.approx(115836600.0)  # 1,158,366 lots x100
+    assert sum(t.size for t in trades.records) == pytest.approx(115836600.0)  # 1,158,366 手 x100
     assert sum(t.turnover for t in trades.records) == pytest.approx(1075742208.0)
     quotes = adapter.read(
         DataRequest(
@@ -384,7 +384,7 @@ def test_real_volume_tick_cross_check() -> None:
             end=end,
         )
     )
-    assert len(quotes.records) == 4595  # every row carries a book state
+    assert len(quotes.records) == 4595  # 每行都携带簿记状态
 
 
 @requires_volume
@@ -393,11 +393,11 @@ def test_real_volume_calendar_session_count() -> None:
     batch = adapter.sessions(
         CalendarRequest(market="CN", start=date(2024, 1, 1), end=date(2024, 12, 31))
     )
-    assert len(batch.records) == 242  # matches market_breadth row count for 2024
+    assert len(batch.records) == 242  # 与 2024 年 market_breadth 行数一致
 
 
 # ---------------------------------------------------------------------------
-# downloader + processing (data/ packages)
+# 下载器 + 处理（data/ 各包）
 # ---------------------------------------------------------------------------
 
 
@@ -425,7 +425,7 @@ def test_raw_volume_writer_lands_legacy_layout(tmp_path) -> None:
     stored = pd.read_parquet(written[0])
     assert len(stored) == 1
 
-    # second write merges and dedupes on identical rows
+    # 第二次写入会合并并去重完全相同的行
     writer.write_scope("trade_data/daily", frame)
     stored = pd.read_parquet(written[0])
     assert len(stored) == 1
@@ -457,17 +457,17 @@ def test_tushare_downloader_skeleton_with_injected_client(tmp_path) -> None:
     downloader = TushareDownloader(client=client, root=tmp_path)
     written = downloader.download("trade_data/daily", "20240102", "20240103")
     assert written and all(p.is_file() for p in written)
-    assert len(client.calls) == 2  # two trade days requested
+    assert len(client.calls) == 2  # 请求了两个交易日
 
     with pytest.raises(ValueError):
-        TushareDownloader()  # credentials are always injected, never read
+        TushareDownloader()  # 凭证始终由外部注入，绝不读取
 
 
 def test_derived_indicator_adapter_computes_ma(tmp_path) -> None:
     from data.processing import DerivedIndicatorAdapter
 
     volume = tmp_path / "vol"
-    _make_volume(volume)  # reuse the synthetic builder below
+    _make_volume(volume)  # 复用下方合成数据构建器
     bars = WorkspaceBarAdapter(volume)
     derived = DerivedIndicatorAdapter(bars)
     start = datetime(2024, 1, 2, 0, 0, tzinfo=CST)
@@ -500,19 +500,18 @@ def test_derived_indicator_adapter_computes_ma(tmp_path) -> None:
 
 
 def _make_volume(root) -> None:
-    """Synthetic consolidated-layout volume built through the downloader writer.
+    """通过下载器写入流程构建的合成整合布局卷。
 
-    Exercising ``RawVolumeWriter`` + ``pack_kline`` keeps the fixture and the
-    real download path aligned by construction.  The tick day files are raw
-    vendor-layout parquet (written by ``tick_import`` in production) and are
-    written directly.
+    走一遍 ``RawVolumeWriter`` + ``pack_kline`` 可使该夹具与真实下载路径在
+    构造上保持一致。逐笔日文件由生产环境中的 ``tick_import`` 写入，是原始
+    厂商布局的 parquet，这里直接写入。
     """
     import pathlib
 
     root = pathlib.Path(root)
     writer = RawVolumeWriter(root)
 
-    # calendar
+    # 日历
     writer.write_dataset(
         "calendar.session",
         pd.DataFrame(
@@ -522,7 +521,7 @@ def _make_volume(root) -> None:
             }
         ),
     )
-    # instruments
+    # 证券
     writer.write_dataset(
         "instrument.master",
         pd.DataFrame(
@@ -542,7 +541,7 @@ def _make_volume(root) -> None:
             }
         ),
     )
-    # industry membership
+    # 行业归属
     writer.write_dataset(
         "industry.membership",
         pd.DataFrame(
@@ -555,8 +554,8 @@ def _make_volume(root) -> None:
             }
         ),
     )
-    # daily bars: vol in lots, amount in thousand-yuan, stock+index+fund rows;
-    # land the per-day raw files, then pack the yearly kline table
+    # 每日 K 线：成交量单位为手，成交额为千元，含股票+指数+基金行；
+    # 先落每日原始文件，再打包年度 kline 表
     kline = pd.DataFrame(
         {
             "ts_code": ["000001.SZ", "000001.SZ", "600000.SH", "000001.SH", "510300.SH"],
@@ -578,7 +577,7 @@ def _make_volume(root) -> None:
     )
     writer.write_dataset("market.bar", kline)
     pack_kline(root, "2024")
-    # yearly daily metrics: market values in ten-thousand units
+    # 年度每日指标：市值单位为万元
     writer.write_dataset(
         "market.daily_metric",
         pd.DataFrame(
@@ -604,7 +603,7 @@ def _make_volume(root) -> None:
             }
         ),
     )
-    # one tick day: three rows for 000001.SZ (trade+quote, quote-only, trade+quote)
+    # 一个逐笔日：000001.SZ 三行（成交+报价，仅报价，成交+报价）
     _write(
         pd.DataFrame(
             {

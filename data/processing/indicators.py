@@ -1,14 +1,12 @@
-"""``derived.technical_indicator`` — indicator computation over canonical bars.
+"""``derived.technical_indicator`` —— 基于标准 kline 的指标计算。
 
-Second-stage processing per the data-extension design (section 5.10): the
-derived adapter reads the *canonical* ``market.bar`` dataset, computes an
-indicator, and returns a standard ``TableBatch`` whose provenance carries the
-input data revision and the calculation version.  It never bypasses the
-gateway to touch raw vendor tables.
+按照数据扩展设计（第 5.10 节）的第二阶段处理：衍生适配器读取*标准*的
+``market.bar`` 数据集，计算指标，并返回一个标准 ``TableBatch``，其溯源携带
+输入数据版本与计算版本。它绝不绕过网关去触碰原始厂商表。
 
-Indicator names embed their parameter, e.g. ``filters={"indicator": "ma20"}``
-(mean of the last 20 closes) or ``"ema12"``.  The parameter hash in each row
-keys the (instrument, date, indicator, params) tuple for caching/dedup.
+指标名内嵌其参数，例如 ``filters={"indicator": "ma20"}``（最近 20 个收盘价
+的均值）或 ``"ema12"``。每行的参数哈希作为 (instrument, date, indicator,
+params) 元组的键，用于缓存/去重。
 """
 
 from __future__ import annotations
@@ -48,12 +46,12 @@ def _capability() -> DatasetCapability:
 
 
 class DerivedIndicatorAdapter:
-    """Computes ``derived.technical_indicator`` from canonical ``market.bar``."""
+    """从标准 ``market.bar`` 计算 ``derived.technical_indicator``。"""
 
     DATASETS = (DATASET,)
 
     def __init__(self, bars: Any) -> None:
-        """``bars`` must serve ``market.bar`` (e.g. ``WorkspaceBarAdapter``)."""
+        """``bars`` 必须提供 ``market.bar`` 数据（例如 ``WorkspaceBarAdapter``）。"""
         self._bars = bars
         self.descriptor = AdapterDescriptor(
             name=ADAPTER_NAME,

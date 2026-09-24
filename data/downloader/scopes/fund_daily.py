@@ -1,9 +1,8 @@
-"""ETF/fund daily bars fetcher (legacy scope ``fund/daily``).
+"""ETF/基金日线获取器（旧作用域 ``fund/daily``）。
 
-Calls the vendor ``fund_daily`` interface per ETF code and lands the rows into
-``{year}/kline.parquet`` tagged ``data_type='fund'`` (the ``fund.bar`` dataset
-is a filtered view of the shared kline file).  Vendor fields stay raw; the
-lots/thousand-yuan conversions happen in the adapters.
+按每个 ETF 代码调用厂商 ``fund_daily`` 接口，将行写入 ``{year}/kline.parquet`` 并打上
+``data_type='fund'`` 标签（``fund.bar`` 数据集是共享 K 线文件的过滤视图）。厂商字段保持原样；
+手/千元换算发生在适配层。
 """
 
 from __future__ import annotations
@@ -45,7 +44,7 @@ def fetch_fund_daily(
     sleep: float = 0.15,
     **options: Any,
 ) -> pd.DataFrame:
-    """Fetch daily bars for the configured ETF codes into the kline layout."""
+    """将配置的 ETF 代码的日线数据拉取到 K 线布局。"""
     etf_codes = options.get("etf_codes") or DEFAULT_ETF_CODES
     max_retries = options.get("max_retries", 3)
     if not etf_codes:

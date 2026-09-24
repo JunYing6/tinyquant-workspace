@@ -1,4 +1,4 @@
-"""Gateway assembly for the workspace data adapters."""
+"""工作区数据适配器的网关组装。"""
 
 from __future__ import annotations
 
@@ -27,20 +27,17 @@ def build_workspace_gateway(
     realtime_client: Any = None,
     **gateway_kwargs: Any,
 ) -> DataGateway:
-    """Assemble a :class:`DataGateway` over the consolidated workspace volume
-    (duckdb tables + per-day parquet).
+    """在整合后的工作区数据卷（duckdb 表 + 按日 parquet）之上组装一个 :class:`DataGateway`。
 
-    Phase-1 bindings: ``calendar.session``, ``instrument.master``,
-    ``industry.membership``, ``market.bar``, ``index.bar``, ``fund.bar``,
-    ``market.daily_metric``, ``market.trade``, ``market.quote`` and the
-    ``market.daily_snapshot`` composite view.  Phase-2 datasets (financials,
-    events, auxiliary tables) and ``contract_only`` datasets have no binding
-    yet and fail with ``UnsupportedDatasetError`` when requested.
+    一期绑定：``calendar.session``、``instrument.master``、
+    ``industry.membership``、``market.bar``、``index.bar``、``fund.bar``、
+    ``market.daily_metric``、``market.trade``、``market.quote`` 以及
+    ``market.daily_snapshot`` 复合视图。二期数据集（财务、事件、辅助表）以及
+    ``contract_only`` 数据集尚未绑定，请求时以 ``UnsupportedDatasetError`` 失败。
 
-    When ``realtime_client`` is provided, ``market.trade`` / ``market.quote``
-    also get a realtime (push/poll) binding served by
-    :class:`WorkspaceRealtimeAdapter`, so live engines can subscribe through
-    the gateway.
+    当提供 ``realtime_client`` 时，``market.trade`` / ``market.quote`` 还会获得由
+    :class:`WorkspaceRealtimeAdapter` 提供的实时（push/poll）绑定，这样实盘引擎
+    就能通过网关订阅。
     """
     root = Path(data_root) if data_root is not None else _default_root()
     calendar_adapter = WorkspaceCalendarAdapter(root, market)

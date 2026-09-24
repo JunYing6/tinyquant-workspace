@@ -1,9 +1,8 @@
-"""HSGT flow summary fetcher (legacy scope ``trade_data/moneyflow_hsgt``).
+"""沪深港通资金流汇总获取器（旧作用域 ``trade_data/moneyflow_hsgt``）。
 
-Calls the vendor ``moneyflow_hsgt`` interface per month and lands the raw rows
-at ``{year}/moneyflow_hsgt.parquet`` (``ggt_ss``/``ggt_sz``/``hgt``/``sgt``/
-``north_money``/``south_money``, vendor yuan).  The per-stock northbound
-net-buy file is a different scope (``trade_data/northbound``).
+按月调用厂商 ``moneyflow_hsgt`` 接口，将原始行写入 ``{year}/moneyflow_hsgt.parquet``
+（``ggt_ss``/``ggt_sz``/``hgt``/``sgt``/``north_money``/``south_money``，厂商元单位）。
+按个股的北向净买入文件是另一个作用域（``trade_data/northbound``）。
 """
 
 from __future__ import annotations
@@ -27,7 +26,7 @@ def fetch_moneyflow_hsgt(
     sleep: float = 0.0,
     **options: Any,
 ) -> pd.DataFrame:
-    """Fetch HSGT north/south flow summary rows for every month in the range."""
+    """按区间内的每个月拉取沪深港通南北向资金流汇总行。"""
     max_retries = options.get("max_retries", 3)
     all_rows: list[pd.DataFrame] = []
 

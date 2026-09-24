@@ -1,12 +1,9 @@
-"""Macro indicator fetcher (legacy scope ``macro/indicator``).
+"""宏观指标获取器（旧作用域 ``macro/indicator``）。
 
-Fetches monthly CPI/PMI from the vendor (``cn_cpi``/``cn_pmi``) and the EPU
-index from akshare (optional), stacking them into the long legacy layout
-``{root}/macro.parquet`` (``month``/``indicator``/``value``, ``indicator`` in
-cpi/pmi/epu).  Vendor values stay raw (the CPI value is the vendor's year-on-
-year figure).  The EPU source is injectable via the ``epu_fetcher`` option;
-without it the module falls back to ``import akshare`` and skips the series
-when akshare is unavailable.
+从厂商拉取月度 CPI/PMI（``cn_cpi``/``cn_pmi``），并从 akshare（可选）拉取 EPU 指数，
+堆叠为旧版长表布局 ``{root}/macro.parquet``（``month``/``indicator``/``value``，
+``indicator`` 取 cpi/pmi/epu）。厂商值保持原样（CPI 值为厂商的同比数值）。EPU 来源可通过
+``epu_fetcher`` 选项注入；未注入时本模块回退到 ``import akshare``，并在 akshare 不可用时跳过该序列。
 """
 
 from __future__ import annotations
@@ -27,7 +24,7 @@ def fetch_macro(
     sleep: float = 0.0,
     **options: Any,
 ) -> pd.DataFrame:
-    """Fetch CPI/PMI(/EPU) monthly series into the long macro layout."""
+    """将 CPI/PMI(/EPU) 月度序列拉取为长格式 macro 布局。"""
     start_month = start[:6]
     end_month = end[:6]
 
@@ -85,7 +82,7 @@ def _download_pmi(client: Any, start_month: str, end_month: str) -> pd.DataFrame
 
 
 def _download_epu(epu_fetcher: Callable[[], pd.DataFrame] | None) -> pd.DataFrame | None:
-    """Fetch the EPU monthly index from an injected fetcher or akshare."""
+    """从注入的获取器或 akshare 拉取 EPU 月度指数。"""
     if epu_fetcher is None:
         try:
             import akshare as ak

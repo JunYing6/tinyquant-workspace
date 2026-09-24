@@ -1,8 +1,7 @@
-"""Balance sheet fetcher (legacy scope ``fina/balance_report``).
+"""资产负债表获取器（旧作用域 ``fina/balance_report``）。
 
-Calls the vendor ``balancesheet_vip`` interface per report period with offset
-pagination and lands the raw rows at ``{root}/balance_report.parquet`` (global
-table, deduplicated on ``ts_code``+``end_date``+``ann_date``).
+按报告期调用厂商 ``balancesheet_vip`` 接口，使用 offset 分页，将原始行写入
+``{root}/balance_report.parquet``（全局表，按 ``ts_code``+``end_date``+``ann_date`` 去重）。
 """
 
 from __future__ import annotations
@@ -41,7 +40,7 @@ def fetch_balance(
     sleep: float = 0.3,
     **options: Any,
 ) -> pd.DataFrame:
-    """Fetch quarterly balance sheets for every report period in the range."""
+    """按区间内的每个报告期拉取季度资产负债表。"""
     periods = report_periods(start, end)
     logger.info("[balance] 报告期列表: %s", periods)
 

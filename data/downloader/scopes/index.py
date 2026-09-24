@@ -1,10 +1,8 @@
-"""Index daily bars fetcher (legacy scope ``index/daily``).
+"""指数日线获取器（旧作用域 ``index/daily``）。
 
-Calls the vendor ``index_daily`` interface per index code and lands the rows
-into ``{year}/kline.parquet`` tagged ``data_type='index'`` — the same physical
-file as equity bars; the ``index.bar`` dataset is a filtered view of it.
-Vendor fields (vol in index-native unit, amount in thousand yuan) stay raw;
-conversions live in the adapters.
+按每个指数代码调用厂商 ``index_daily`` 接口，将行写入 ``{year}/kline.parquet`` 并打上
+``data_type='index'`` 标签——与股票 K 线是同一个物理文件；``index.bar`` 数据集是它的过滤视图。
+厂商字段保持原样（``vol`` 为指数原生单位，``amount`` 为千元）；单位换算在适配层。
 """
 
 from __future__ import annotations
@@ -35,7 +33,7 @@ def fetch_index_daily(
     sleep: float = 0.0,
     **options: Any,
 ) -> pd.DataFrame:
-    """Fetch daily bars for the configured index codes into the kline layout."""
+    """将配置的指数代码的日线数据拉取到 K 线布局。"""
     index_codes = options.get("index_codes") or DEFAULT_INDEX_CODES
     max_retries = options.get("max_retries", 3)
 

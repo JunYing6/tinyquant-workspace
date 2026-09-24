@@ -1,1 +1,1 @@
-"""Configuration package for the user-side example project."""
+"""用户侧示例项目的配置包。"""

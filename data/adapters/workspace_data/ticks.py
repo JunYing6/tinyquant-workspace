@@ -1,16 +1,14 @@
-"""Per-day tick adapter: ``market.trade`` and ``market.quote``.
+"""每日 tick 适配器：``market.trade`` 与 ``market.quote``。
 
-Physical source: ``{root}/{year}/{MMDD}/stock.parquet`` (equities, five-level
-book) and ``{root}/{year}/{MMDD}/index.parquet`` (index trades).  One row may
-carry both a trade and a book state: rows with ``pr > 0`` emit a ``TradeTick``
-and rows with any valid book level emit a ``QuoteTick`` (the design allows both
-from one source row when both facts are proven; ``pr == 0`` rows are
-quote-only snapshots and never fabricate a trade).
+物理数据源：``{root}/{year}/{MMDD}/stock.parquet``（股票，五档盘口）以及
+``{root}/{year}/{MMDD}/index.parquet``（指数成交）。一行可能同时携带一笔
+成交和一个盘口状态：``pr > 0`` 的行生成 ``TradeTick``，含任意有效盘口档位的
+行生成 ``QuoteTick``（当两个事实都被证明时，设计允许从同一数据行生成两者；
+``pr == 0`` 的行是仅报价快照，绝不会伪造成交）。
 
-Sequences are synthetic (row order per instrument per day) and reported as a
-``SEQUENCE_SYNTHETIC`` quality warning; strict cross-instrument replay must
-therefore not rely on global ordering (the source declares per-instrument
-ordering only).
+序列号为合成值（每个标的每天的逐行顺序），并以 ``SEQUENCE_SYNTHETIC``
+质量告警上报；因此严格的跨标的重放不能依赖全局顺序（数据源仅声明按标的
+排序）。
 """
 
 from __future__ import annotations
@@ -40,8 +38,8 @@ ADAPTER_NAME = "workspace-tick"
 SCHEMA_VERSION = "1"
 SOURCE = "workspace-tick"
 
-_EQUITY_SIZE_FACTOR = 100.0  # lots -> shares for equities
-_INDEX_SIZE_FACTOR = 1.0  # index quantity keeps the source-native unit
+_EQUITY_SIZE_FACTOR = 100.0  # 手 -> 股（股票）
+_INDEX_SIZE_FACTOR = 1.0  # 指数量保留数据源原生单位
 
 _SIDE_MAP = {"B": "BUY", "S": "SELL"}
 _LEVEL_COLUMNS = tuple((f"b{i}p", f"b{i}v") for i in range(1, 6))
@@ -61,7 +59,7 @@ def _capability(dataset: str) -> DatasetCapability:
 
 
 class WorkspaceTickAdapter:
-    """Serves ``market.trade`` / ``market.quote`` from the per-day tick files."""
+    """从每日 tick 文件提供 ``market.trade`` / ``market.quote``。"""
 
     DATASETS = ("market.trade", "market.quote")
 

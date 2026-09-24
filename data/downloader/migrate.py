@@ -1,29 +1,27 @@
-"""One-time migration: legacy parquet volume -> consolidated duckdb layout.
+"""一次性迁移：旧版 parquet 卷 -> 整合后的 duckdb 布局。
 
-Converts the pre-consolidation ``E:/ProgramData`` layout
+将整合前 ``E:/ProgramData`` 布局
 
-    {root}/*.parquet                     global tables
-    {root}/{year}/*.parquet              yearly tables (incl. kline.parquet)
-    {root}/{year}/{MMDD}/index_member.parquet  per-day membership files
+    {root}/*.parquet                     全局表
+    {root}/{year}/*.parquet              年度表（含 kline.parquet）
+    {root}/{year}/{MMDD}/index_member.parquet  按日成分文件
 
-into the consolidated layout
+转换为整合后布局
 
-    {root}/reference.duckdb              global tables
-    {root}/{year}/year.duckdb            yearly tables (kline + 5d/10d packed)
-    {root}/{year}/{MMDD}/kline.parquet   per-day bar files (raw layer)
-    {root}/{year}/{MMDD}/stock|tradable|index.parquet  untouched tick volumes
+    {root}/reference.duckdb              全局表
+    {root}/{year}/year.duckdb            年度表（kline + 已打包的 5d/10d）
+    {root}/{year}/{MMDD}/kline.parquet   按日 bar 文件（原始层）
+    {root}/{year}/{MMDD}/stock|tradable|index.parquet  未触碰的分笔卷
 
-Safety model: every conversion writes into the target duckdb first, then the
-source frame and the written table are validated against each other (row
-count, column set, content digest); source parquet files are deleted only
-when every table of the batch validated.  Run with ``apply=False`` (default)
-to convert + validate without deleting anything, then ``apply=True`` to also
-remove the legacy files.
+安全模型：每次转换先把数据写入目标 duckdb，然后将源数据帧与所写表
+相互校验（行数、列集合、内容摘要）；只有当该批次所有表都通过校验后
+才删除源 parquet 文件。以 ``apply=False``（默认）运行可转换 + 校验而
+不删除任何内容，再以 ``apply=True`` 运行即可一并移除旧版文件。
 
-Usage::
+用法::
 
-    python -m data.downloader.migrate E:/ProgramData            # dry run
-    python -m data.downloader.migrate E:/ProgramData --apply    # convert + delete
+    python -m data.downloader.migrate E:/ProgramData            # 试运行
+    python -m data.downloader.migrate E:/ProgramData --apply    # 转换 + 删除
 """
 
 from __future__ import annotations
@@ -43,14 +41,14 @@ logger = logging.getLogger(__name__)
 REFERENCE_DB = "reference.duckdb"
 YEAR_DB = "year.duckdb"
 
-# {root}/*.parquet -> reference.duckdb tables (file stem = table name)
+# {root}/*.parquet -> reference.duckdb 表（文件主干名 = 表名）
 GLOBAL_TABLES = (
     "trade_date", "stock_basic", "sw_industry", "fina_indicator",
     "income_report", "balance_report", "cashflow_report", "forecast",
     "holdertrade", "top10_holder", "fund_portfolio", "macro",
 )
 
-# {root}/{year}/*.parquet -> {year}/year.duckdb tables; kline handled specially
+# {root}/{year}/*.parquet -> {year}/year.duckdb 表；kline 特殊处理
 YEAR_TABLES = (
     "daily_basic", "margin", "moneyflow", "moneyflow_hsgt", "shibor",
     "yc_cb", "block_trade", "pledge_stat", "stk_holdernumber",
@@ -58,8 +56,8 @@ YEAR_TABLES = (
 )
 MINUTE_TABLE_PREFIX = "minute_"
 
-# reference-type tables the legacy layout misplaced inside year directories
-# (2020-2022 report snapshots); they consolidate into reference.duckdb
+# 旧版布局误置于年度目录内的 reference 类型表
+# （2020-2022 报告快照）；它们应合并进 reference.duckdb
 REFERENCE_TABLES_IN_YEARS = ("income_report", "balance_report", "cashflow_report")
 
 KLINE_DEDUPE_KEYS = ["ts_code", "trade_date", "data_type", "timeframe"]
@@ -67,7 +65,7 @@ KLINE_DEDUPE_KEYS = ["ts_code", "trade_date", "data_type", "timeframe"]
 
 @dataclass
 class MigrationReport:
-    """Per-table conversion + validation outcome."""
+    """每张表的转换 + 校验结果。"""
 
     converted: list[str] = field(default_factory=list)
     validated: list[str] = field(default_factory=list)
@@ -80,10 +78,10 @@ class MigrationReport:
 
 
 def _canonical(frame: pd.DataFrame) -> pd.DataFrame:
-    """Normalize column dtypes so parquet-side and duckdb-side frames compare equal.
+    """归一化列 dtype，使 parquet 侧与 duckdb 侧的数据帧可比。
 
-    Numeric-ish columns (including numeric strings) become float64; everything
-    else becomes str with nulls normalized to "".
+    数值型列（含数字字符串）转为 float64；其余列转为 str，
+    并将空值归一化为 ""。
     """
     out = {}
     for col in frame.columns:
@@ -100,11 +98,11 @@ def _canonical(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def _validate(db_path: Path, table: str, source: pd.DataFrame, report: MigrationReport, label: str) -> bool:
-    """Full-content check: every distinct source row must exist in the written table.
+    """全内容校验：源数据的每个去重行都必须出现在所写的表中。
 
-    Both sides pass through :func:`_canonical` first (dtype alignment), then a
-    pandas left-join verifies containment (pandas treats NaN keys as equal,
-    which duckdb's EXCEPT hash does not — hence no SQL anti-join here).
+    两侧先经 :func:`_canonical` 处理（对齐 dtype），再用 pandas 左连接
+    校验包含关系（pandas 将 NaN 键视为相等，而 duckdb 的 EXCEPT 哈希
+    不会这样做——因此这里不用 SQL 反连接）。
     """
     written = read_duckdb_table(db_path, table)
     problems: list[str] = []
@@ -132,7 +130,7 @@ def _validate(db_path: Path, table: str, source: pd.DataFrame, report: Migration
 
 
 def migrate_reference(root: Path, report: MigrationReport) -> None:
-    """Convert global parquet tables into ``reference.duckdb``."""
+    """将全局 parquet 表转换为 ``reference.duckdb``。"""
     db_path = root / REFERENCE_DB
     for name in GLOBAL_TABLES:
         source_path = root / f"{name}.parquet"
@@ -149,7 +147,7 @@ def migrate_reference(root: Path, report: MigrationReport) -> None:
 
 
 def migrate_year(root: Path, year: str, report: MigrationReport) -> None:
-    """Convert one year's parquet tables into ``{year}/year.duckdb``."""
+    """将某年的 parquet 表转换为 ``{year}/year.duckdb``。"""
     year_dir = root / year
     db_path = year_dir / YEAR_DB
 
@@ -186,7 +184,7 @@ def migrate_year(root: Path, year: str, report: MigrationReport) -> None:
             raise SystemExit(f"validation failed for {minute_file}; aborting before delete")
         report.deleted.append(str(minute_file))
 
-    # per-day index_member files -> one yearly table
+    # 按日 index_member 文件 -> 一张年度表
     member_files = sorted(year_dir.glob("*/index_member.parquet"))
     if member_files:
         frame = pd.concat((pd.read_parquet(p) for p in member_files), ignore_index=True)
@@ -203,17 +201,16 @@ def migrate_year(root: Path, year: str, report: MigrationReport) -> None:
             if day_dir.is_dir() and day_dir.name.isdigit() and not any(day_dir.iterdir()):
                 day_dir.rmdir()
 
-    # kline: pour the yearly vendor rows into year.duckdb#kline (1d base),
-    # mirror them into the per-day files for days that already have a daily
-    # directory (keeping the 4-files-per-day layout where ticks exist), pack
-    # the derived timeframes, then drop the legacy yearly file.  Years without
-    # any daily directory keep their bars db-only.
+    # kline: 将年度厂商行汇入 year.duckdb#kline（1d 基表），
+    # 对已有日线目录的日期将其镜像进按日文件（在存在分笔处保持每日 4 文件
+    # 布局），打包派生周期，然后删除旧版年度文件。没有任何日线目录的年份
+    # 其 bar 仅存于数据库中。
     kline_path = year_dir / "kline.parquet"
     if kline_path.is_file():
         frame = pd.read_parquet(kline_path)
-        # keep null trade_date as NULL (never the string "nan"): a handful of
-        # legacy rows carry only an adj_factor with no date/prices — preserved
-        # verbatim, skipped by the day mirror and the bar derivation
+        # 将空的 trade_date 保留为 NULL（绝不用字符串 "nan"）：少数旧版
+        # 行只带有 adj_factor 而无日期/价格——原样保留，日线镜像与 bar
+        # 派生时跳过
         frame["trade_date"] = frame["trade_date"].astype("string")
         merge_duckdb_table(db_path, KLINE_TABLE, frame, KLINE_DEDUPE_KEYS)
 
@@ -253,7 +250,7 @@ def migrate_year(root: Path, year: str, report: MigrationReport) -> None:
 
 
 def migrate_volume(root: str | Path, *, apply: bool = False) -> MigrationReport:
-    """Convert the whole legacy volume; delete legacy files only when ``apply``."""
+    """转换整个旧版卷；仅当 ``apply`` 时才删除旧版文件。"""
     root = Path(root)
     if not root.is_dir():
         raise SystemExit(f"数据卷不存在: {root}")

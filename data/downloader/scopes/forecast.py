@@ -1,13 +1,10 @@
-"""Performance forecast fetcher (legacy scope ``event/forecast``).
+"""业绩预告获取器（旧作用域 ``event/forecast``）。
 
-Calls the vendor ``forecast`` interface once per trading day (the interface
-requires ``ann_date``) and lands the raw rows at
-``{root}/forecast.parquet`` (global table, deduplicated on
-``ts_code``+``ann_date``+``end_date``).
+按每个交易日调用厂商 ``forecast`` 接口（该接口需要 ``ann_date``），将原始行写入
+``{root}/forecast.parquet``（全局表，按 ``ts_code``+``ann_date``+``end_date`` 去重）。
 
-The legacy volume keeps only the strategy-relevant forecast types (预减/扭亏)
-in this file, so the row filter is preserved; the ``type`` column itself is
-vendor-native.  The interface is rate-limited to 120 calls/minute.
+旧卷在该文件中只保留策略关注的预告类型（预减/扭亏），因此保留该行过滤逻辑；
+``type`` 列本身是厂商原生值。该接口限流为 120 次/分钟。
 """
 
 from __future__ import annotations
@@ -41,7 +38,7 @@ def fetch_forecast(
     calendar: Callable[[str, str], list[str]] | None = None,
     **options: Any,
 ) -> pd.DataFrame:
-    """Fetch forecasts announced on every trading day in the range."""
+    """按区间内每个交易日拉取当日公告的业绩预告。"""
     if calendar is None:
         raise ValueError("event/forecast needs a calendar provider (injected or vendor)")
     trade_dates = calendar(start, end)

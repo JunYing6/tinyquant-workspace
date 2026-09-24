@@ -1,8 +1,7 @@
-"""Holder-number fetcher (legacy scope ``event/stk_holdernumber``).
+"""股东户数获取器（旧作用域 ``event/stk_holdernumber``）。
 
-Calls the vendor ``stk_holdernumber`` interface per month with offset
-pagination and lands the raw rows at ``{year}/stk_holdernumber.parquet``
-(grouped by ``ann_date`` year, deduplicated on ``ts_code``+``ann_date``).
+按月调用厂商 ``stk_holdernumber`` 接口，使用 offset 分页，将原始行写入
+``{year}/stk_holdernumber.parquet``（按 ``ann_date`` 的年份分组，按 ``ts_code``+``ann_date`` 去重）。
 """
 
 from __future__ import annotations
@@ -25,7 +24,7 @@ def fetch_stk_holdernumber(
     sleep: float = 0.2,
     **options: Any,
 ) -> pd.DataFrame:
-    """Fetch holder-number rows for every month in the range."""
+    """按区间内的每个月拉取股东户数行。"""
     all_rows: list[pd.DataFrame] = []
 
     for ym in iter_months(start, end):

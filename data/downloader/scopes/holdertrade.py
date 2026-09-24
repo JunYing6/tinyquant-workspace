@@ -1,8 +1,7 @@
-"""Holder share-change fetcher (legacy scope ``event/holdertrade``).
+"""股东持股变动获取器（旧作用域 ``event/holdertrade``）。
 
-Calls the vendor ``stk_holdertrade`` interface per month with offset
-pagination and lands the raw rows at ``{root}/holdertrade.parquet`` (global
-table, deduplicated on ``ts_code``+``ann_date``+``holder_name``+``in_de``).
+按月调用厂商 ``stk_holdertrade`` 接口，使用 offset 分页，将原始行写入
+``{root}/holdertrade.parquet``（全局表，按 ``ts_code``+``ann_date``+``holder_name``+``in_de`` 去重）。
 """
 
 from __future__ import annotations
@@ -32,7 +31,7 @@ def fetch_holdertrade(
     sleep: float = 0.3,
     **options: Any,
 ) -> pd.DataFrame:
-    """Fetch holder share-change rows for every month in the range."""
+    """按区间内的每个月拉取股东持股变动行。"""
     all_rows: list[pd.DataFrame] = []
 
     for ym in iter_months(start, end):

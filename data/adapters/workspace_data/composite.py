@@ -1,9 +1,8 @@
-"""``market.daily_snapshot`` composite adapter.
+"""``market.daily_snapshot`` 复合适配器。
 
-Reads the canonical ``market.bar`` and ``market.daily_metric`` datasets and
-joins them on ``(instrument_id, trading_date)``, returning the manifest-defined
-read-only view.  The composition is explicit here (never a silent cross-source
-merge inside the gateway).
+读取规范的 ``market.bar`` 与 ``market.daily_metric`` 数据集，并按
+``(instrument_id, trading_date)`` 连接，返回清单定义的只读视图。这里的组合是显式的
+（绝不在网关内部做静默的跨源合并）。
 """
 
 from __future__ import annotations
@@ -38,7 +37,7 @@ def _capability() -> DatasetCapability:
 
 
 class DailySnapshotCompositeAdapter:
-    """Serves ``market.daily_snapshot`` from market.bar + market.daily_metric."""
+    """基于 market.bar + market.daily_metric 提供 ``market.daily_snapshot``。"""
 
     DATASETS = ("market.daily_snapshot",)
 

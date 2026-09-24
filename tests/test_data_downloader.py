@@ -1,20 +1,18 @@
-"""Contract tests for the data download package.
+"""数据下载包的契约测试。
 
-Every registered legacy scope is exercised against an injected fake vendor
-client (no network, no credentials): the test asserts that
+每个已注册的旧版 scope 都针对注入的假厂商客户端进行测试（无需网络、
+无需凭证）：该测试断言：
 
-1. the touched files/tables land at the exact ``MigrationMapping`` layout
-   (duckdb tables for yearly/global data, per-day parquet for daily bars and
-   tick volumes),
-2. the written column sets match the legacy layout,
-3. repeated downloads merge + deduplicate (business key, keep last),
-4. the packed ``kline`` table carries the 5d/10d derived timeframes,
-5. the legacy-volume migration converts, validates and deletes correctly.
+1. 触达的文件/表精确落在 ``MigrationMapping`` 布局中
+   （年度/全局数据用 duckdb 表，每日K线与逐笔卷用按日 parquet），
+2. 写入的列集合与旧版布局一致，
+3. 重复下载会合并 + 去重（业务键，保留最后一条），
+4. 打包后的 ``kline`` 表携带 5d/10d 派生周期，
+5. 旧版卷迁移能正确转换、校验并删除。
 
-The tick CSV ingestion additionally asserts the exact 28-column schema of
-``{year}/{MMDD}/stock.parquet`` — including dtypes — and, when the real USB
-volume is mounted, compares the produced schema against a real trading-day
-file (``E:/ProgramData/2024/0102/stock.parquet``).
+逐笔 CSV 导入额外断言 ``{year}/{MMDD}/stock.parquet`` 的确切 28 列结构
+——包括数据类型——并在真实 USB 卷已挂载时，将产出的结构同真实交易日文件
+（``E:/ProgramData/2024/0102/stock.parquet``）进行比较。
 """
 
 from __future__ import annotations
@@ -43,19 +41,19 @@ YEAR_DB = "2024/year.duckdb"
 
 
 def read_target(root: Path, rel: str, table: str | None) -> pd.DataFrame:
-    """Read a layout target: duckdb table when a table name is given, else parquet."""
+    """读取布局目标：给定表名时读 duckdb 表，否则读 parquet。"""
     if table is not None:
         return read_duckdb_table(root / rel, table)
     return pl.read_parquet(root / rel).to_pandas()
 
 
 # ---------------------------------------------------------------------------
-# fake vendor client (offline)
+# 假厂商客户端（离线）
 # ---------------------------------------------------------------------------
 
 
 def _shape(df: pd.DataFrame, fields: str | None) -> pd.DataFrame:
-    """Mimic Tushare's ``fields`` projection (requested order, subset)."""
+    """模拟 Tushare 的 ``fields`` 投影（按请求顺序，取子集）。"""
     if fields is None:
         return df.copy()
     requested = [c for c in fields.split(",") if c in df.columns]
@@ -63,7 +61,7 @@ def _shape(df: pd.DataFrame, fields: str | None) -> pd.DataFrame:
 
 
 class FakeTushareClient:
-    """Offline stand-in for a ``ts.pro_api`` client: echoes vendor-shaped frames."""
+    """``ts.pro_api`` 客户端的离线替身：回显厂商布局的数据帧。"""
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict]] = []
@@ -72,7 +70,7 @@ class FakeTushareClient:
         self.calls.append((method, dict(params)))
         return _shape(frame, params.get("fields"))
 
-    # -- calendar -----------------------------------------------------------
+    # -- 日历 -----------------------------------------------------------
 
     def trade_cal(self, exchange="SSE", start_date="", end_date="", fields=None, **kw):
         rows = []
@@ -88,7 +86,7 @@ class FakeTushareClient:
         df = df[(df["cal_date"] >= start_date) & (df["cal_date"] <= end_date)]
         return self._respond("trade_cal", locals(), df)
 
-    # -- daily complex ------------------------------------------------------
+    # -- 每日综合 ------------------------------------------------------
 
     def daily(self, trade_date="", fields=None, **kw):
         df = pd.DataFrame(
@@ -153,7 +151,7 @@ class FakeTushareClient:
         )
         return self._respond("daily_basic", locals(), df)
 
-    # -- bars ---------------------------------------------------------------
+    # -- K线 ---------------------------------------------------------------
 
     def index_daily(self, ts_code="", start_date="", end_date="", **kw):
         df = pd.DataFrame(
@@ -212,7 +210,7 @@ class FakeTushareClient:
         )
         return self._respond("stk_mins", locals(), df)
 
-    # -- flow / market state --------------------------------------------------
+    # -- 资金流向 / 市场状态 --------------------------------------------------
 
     def moneyflow(self, trade_date="", **kw):
         df = pd.DataFrame(
@@ -330,7 +328,7 @@ class FakeTushareClient:
         )
         return self._respond("yc_cb", locals(), df)
 
-    # -- reference ------------------------------------------------------------
+    # -- 参考 ------------------------------------------------------------
 
     def stock_basic(self, list_status="L", fields=None, exchange="", **kw):
         df = pd.DataFrame(
@@ -395,7 +393,7 @@ class FakeTushareClient:
         )
         return self._respond("index_weight", locals(), df)
 
-    # -- fundamentals / events ------------------------------------------------
+    # -- 基本面 / 事件 ------------------------------------------------
 
     def _report(self, method: str, period: str, fields: str | None, extra: dict):
         base = {"ts_code": INSTRUMENT, "end_date": period, "ann_date": "20240415"}
@@ -463,7 +461,7 @@ class FakeTushareClient:
                     "ts_code": "600000.SH",
                     "ann_date": ann_date,
                     "end_date": "20231230",
-                    "type": "略增",  # must be filtered out by the legacy row filter
+                    "type": "略增",  # 必须被旧版行过滤器过滤掉
                     "p_change_min": 10.0,
                     "p_change_max": 30.0,
                     "net_profit_min": 1.0,
@@ -557,7 +555,7 @@ class FakeTushareClient:
         )
         return self._respond("pledge_stat", locals(), df)
 
-    # -- macro ----------------------------------------------------------------
+    # -- 宏观 ----------------------------------------------------------------
 
     def cn_cpi(self, start_month="", end_month="", **kw):
         return self._respond(
@@ -575,7 +573,7 @@ class FakeTushareClient:
 
 
 class FakeAkshareNorthbound:
-    """Offline stand-in for the akshare functions the northbound scope uses."""
+    """北向 scope 用到的 akshare 函数的离线替身。"""
 
     def stock_info_a_code_name(self):
         return pd.DataFrame({"code": ["000001"], "name": ["平安银行"]})
@@ -611,7 +609,7 @@ class FakeAkshareConsensus:
 
 
 # ---------------------------------------------------------------------------
-# fixtures
+# 夹具
 # ---------------------------------------------------------------------------
 
 
@@ -631,12 +629,12 @@ def downloader(client, root) -> TushareDownloader:
 
 
 # ---------------------------------------------------------------------------
-# registry coverage
+# 注册表覆盖
 # ---------------------------------------------------------------------------
 
 
 def test_registry_covers_all_mapping_legacy_scopes():
-    """Every mappings.py legacy_scope is registered or explicitly exempt."""
+    """每个 mappings.py 的 legacy_scope 都已注册或显式豁免。"""
     assert uncovered_legacy_scopes() == []
     registered = set(list_scopes())
     mapped = {
@@ -645,8 +643,8 @@ def test_registry_covers_all_mapping_legacy_scopes():
         for scope in mapping.legacy_scope
     }
     assert mapped <= registered | set(NON_VENDOR_SCOPES)
-    # trade_data/minute is registered beyond the mappings (minute bars live in
-    # the per-day tick volume in the release catalog) — extras are fine.
+    # trade_data/minute 在映射之外也有注册（分钟K线存放在发布目录的
+    # 按日逐笔卷中）——多出的注册没有问题。
 
 
 def test_downloader_requires_injected_client():
@@ -662,17 +660,17 @@ def test_unknown_scope_raises(downloader):
 
 
 def test_fetcher_never_reads_credentials(downloader, client):
-    """The downloader only talks to the injected client surface."""
+    """下载器只与注入的客户端接口交互。"""
     downloader.download("stock/basic", "20240102", "20240103")
     methods = {method for method, _ in client.calls}
     assert methods == {"stock_basic"}
 
 
 # ---------------------------------------------------------------------------
-# scope-by-scope layout contract (fake client, offline)
+# 逐 scope 布局契约（假客户端，离线）
 # ---------------------------------------------------------------------------
 
-# (scope, options, {(relative target, table-or-None): expected columns})
+# （scope，options，{(相对目标, 表名或None): 期望列}）
 SCOPE_CASES = [
     pytest.param(
         "calendar/trade_cal",
@@ -683,7 +681,7 @@ SCOPE_CASES = [
     pytest.param(
         "stock/basic",
         {},
-        {(REFERENCE_DB, "stock_basic"): None},  # columns == requested vendor fields
+        {(REFERENCE_DB, "stock_basic"): None},  # 列 == 请求的厂商字段
         id="stock/basic",
     ),
     pytest.param(
@@ -712,7 +710,7 @@ SCOPE_CASES = [
     ),
     pytest.param(
         "trade_data/northbound",
-        {"akshare": None},  # replaced with the fake below
+        {"akshare": None},  # 用下方的假客户端替换
         {(YEAR_DB, "northbound_netbuy"): [
             "trade_date", "net_buy_shares", "net_buy", "hold_shares",
             "hold_market_cap", "close", "pct_chg", "ts_code",
@@ -823,13 +821,13 @@ SCOPE_CASES = [
     ),
     pytest.param(
         "macro/indicator",
-        {"epu_fetcher": None},  # replaced with the fake below
+        {"epu_fetcher": None},  # 用下方的假客户端替换
         {(REFERENCE_DB, "macro"): ["month", "indicator", "value"]},
         id="macro/indicator",
     ),
     pytest.param(
         "fina/consensus",
-        {"akshare": None},  # replaced with the fake below
+        {"akshare": None},  # 用下方的假客户端替换
         {(YEAR_DB, "consensus_forecast"): ["ts_code", "year", "eps_mean", "np_mean"]},
         id="fina/consensus",
     ),
@@ -839,7 +837,7 @@ START, END = "20240101", "20241231"
 
 
 def _resolve_scope_options(scope: str, options: dict) -> dict:
-    """Swap the placeholder injections for offline fakes and disable delays."""
+    """将占位注入替换为离线假客户端，并关闭延迟。"""
     options = dict(options)
     if scope == "trade_data/northbound":
         options["akshare"] = FakeAkshareNorthbound()
@@ -866,7 +864,7 @@ def test_scope_download_lands_mapping_layout(downloader, client, root, scope, op
         target = root / rel
         assert target.is_file(), f"scope {scope} missing {rel}"
         if table is None:
-            # parquet targets are written directly and must be in the returned paths
+            # parquet 目标直接写入，且必须出现在返回的路径中
             assert str(target.relative_to(root)) in returned, f"scope {scope}: {rel} not returned"
         frame = read_target(root, rel, table)
         assert len(frame) > 0
@@ -876,7 +874,7 @@ def test_scope_download_lands_mapping_layout(downloader, client, root, scope, op
 
 @pytest.mark.parametrize("scope,options,expected", SCOPE_CASES)
 def test_scope_download_is_idempotent(downloader, root, scope, options, expected):
-    """Re-running the same download does not duplicate rows."""
+    """重复运行同一下载不会产生重复行。"""
     options = _resolve_scope_options(scope, options)
 
     downloader.download(scope, START, END, options=options)
@@ -890,14 +888,14 @@ def test_scope_download_is_idempotent(downloader, root, scope, options, expected
 
 
 # ---------------------------------------------------------------------------
-# multi-dataset scopes and the kline pack
+# 多数据集 scope 与 kline 打包
 # ---------------------------------------------------------------------------
 
 
 def test_daily_scope_writes_day_files_and_packed_tables(downloader, root):
     paths = downloader.download("trade_data/daily", START, END)
 
-    # per-day bar files are the raw layer; the daily_metric table shares the year db
+    # 每日K线文件是原始层；daily_metric 表与年度库共用
     assert {p.relative_to(root) for p in paths} == {
         Path("2024") / "0102" / "kline.parquet",
         Path("2024") / "0103" / "kline.parquet",
@@ -911,7 +909,7 @@ def test_daily_scope_writes_day_files_and_packed_tables(downloader, root):
     ]
     assert set(day_frame["data_type"]) == {"stock"}
 
-    # packed yearly kline table (auto-pack) + daily metric table
+    # 打包后的年度 kline 表（自动打包）+ 每日指标表
     kline = read_duckdb_table(root / YEAR_DB, "kline")
     assert len(kline[kline["timeframe"] == "1d"]) == len(TRADING_DAYS)
     basic = read_duckdb_table(root / YEAR_DB, "daily_basic")
@@ -930,12 +928,12 @@ def test_kline_pack_derives_multi_day_timeframes(downloader, root):
     kline = read_duckdb_table(root / YEAR_DB, "kline")
 
     blocks = kline[kline["timeframe"] == "5d"]
-    assert len(blocks) == 1  # 2 trading days fit in one 5-day block
+    assert len(blocks) == 1  # 2 个交易日组成一个 5 日块
     block = blocks.iloc[0]
-    assert block["trade_date"] == "20240103"  # block ends on the last day
+    assert block["trade_date"] == "20240103"  # 块在最后一天结束
     assert block["open"] == 9.39 and block["close"] == 9.30
     assert block["vol"] == 200000.0 and block["amount"] == 186000.0
-    assert block["pre_close"] is None or pd.isna(block["pre_close"])  # no earlier block
+    assert block["pre_close"] is None or pd.isna(block["pre_close"])  # 没有更早的块
 
     ten_day = kline[kline["timeframe"] == "10d"]
     assert len(ten_day) == 1
@@ -944,7 +942,7 @@ def test_kline_pack_derives_multi_day_timeframes(downloader, root):
 def test_daily_repeated_download_merges_and_refreshes(downloader, root):
     downloader.download("trade_data/daily", START, END)
 
-    # second run with a changed close must refresh the row, not duplicate it
+    # 第二次运行使用变更后的收盘价，应刷新该行而非重复
     original = downloader._client.daily
 
     def shifted(**params):
@@ -956,7 +954,7 @@ def test_daily_repeated_download_merges_and_refreshes(downloader, root):
     downloader.download("trade_data/daily", START, END)
 
     day_frame = pl.read_parquet(root / "2024" / "0102" / "kline.parquet").to_pandas()
-    assert len(day_frame) == 1  # one day per file
+    assert len(day_frame) == 1  # 每个文件一天
     assert set(day_frame["close"]) == {9.99}
     kline = read_duckdb_table(root / YEAR_DB, "kline")
     base = kline[kline["timeframe"] == "1d"]
@@ -1011,7 +1009,7 @@ def test_minute_scope_writes_freq_table(downloader, root):
 
 
 def test_minute_scope_requires_codes(downloader):
-    """Without the codes option the fetcher warns and nothing is written."""
+    """缺少 codes 选项时，fetcher 会发出警告且不写入任何内容。"""
     assert downloader.download("trade_data/minute", START, END) == []
 
 
@@ -1020,17 +1018,17 @@ def test_global_snapshot_merge_dedupe(downloader, root):
     first = read_duckdb_table(root / REFERENCE_DB, "trade_date")
     downloader.download("calendar/trade_cal", START, END)
     second = read_duckdb_table(root / REFERENCE_DB, "trade_date")
-    assert len(second) == len(first)  # dedup on cal_date
+    assert len(second) == len(first)  # 按 cal_date 去重
 
 
 def test_forecast_scope_keeps_legacy_row_filter(downloader, root):
     downloader.download("event/forecast", START, END)
     forecast = read_duckdb_table(root / REFERENCE_DB, "forecast")
-    assert set(forecast["type"]) == {"预减", "扭亏"}  # "略增" filtered like the legacy volume
+    assert set(forecast["type"]) == {"预减", "扭亏"}  # "略增" 会被过滤，同旧版卷
 
 
 def test_trade_cal_scope_feeds_downstream_calendar(downloader, root):
-    """After downloading the calendar, calendar-dependent scopes can resolve trade dates."""
+    """下载日历后，依赖日历的 range 类 download 便可解析交易日。"""
     downloader.download("calendar/trade_cal", START, END)
 
     def provider(start, end):
@@ -1050,7 +1048,7 @@ def test_trade_cal_scope_feeds_downstream_calendar(downloader, root):
 
 
 # ---------------------------------------------------------------------------
-# tick CSV ingestion
+# 逐笔 CSV 导入
 # ---------------------------------------------------------------------------
 
 CSV_HEADER = (
@@ -1077,21 +1075,21 @@ def _write_csv(path: Path, rows: list[str]) -> None:
 
 
 def _build_csv_volume(csv_root: Path) -> None:
-    """SH + SZ month dirs: stocks, an index, an ETF, and an excluded B-share."""
+    """SH + SZ 月度目录：股票、一个指数、一个 ETF，以及被排除的 B 股。"""
     stock_rows = [
-        _tick_row("09:15:00", "0.0", "0", "0", "0"),          # opening auction -> flag 0
-        _tick_row("09:30:00", "9.29", "10", "10", "9290"),    # continuous -> flag 1
-        _tick_row("14:57:00", "9.21", "0", "100", "9210"),    # closing auction -> flag 2
+        _tick_row("09:15:00", "0.0", "0", "0", "0"),          # 开盘集合竞价 -> flag 0
+        _tick_row("09:30:00", "9.29", "10", "10", "9290"),    # 连续竞价 -> flag 1
+        _tick_row("14:57:00", "9.21", "0", "100", "9210"),    # 收盘集合竞价 -> flag 2
     ]
     index_rows = [
         "20240102,09:30:00,3020.5,100,200,302050000",
         "20240102,09:30:05,3021.0,50,250,302150000",
     ]
     _write_csv(csv_root / "SH" / "202401" / "20240102" / "600000.csv", stock_rows)
-    _write_csv(csv_root / "SH" / "202401" / "20240102" / "000001.csv", index_rows)  # SH 000xxx -> index
-    _write_csv(csv_root / "SZ" / "202401" / "20240102" / "000001.csv", stock_rows)  # SZ 000xxx -> stock
-    _write_csv(csv_root / "SZ" / "202401" / "20240102" / "510300.csv", stock_rows)  # ETF -> tradable
-    _write_csv(csv_root / "SZ" / "202401" / "20240102" / "900001.csv", stock_rows)  # B share -> excluded
+    _write_csv(csv_root / "SH" / "202401" / "20240102" / "000001.csv", index_rows)  # SH 000xxx -> 指数
+    _write_csv(csv_root / "SZ" / "202401" / "20240102" / "000001.csv", stock_rows)  # SZ 000xxx -> 股票
+    _write_csv(csv_root / "SZ" / "202401" / "20240102" / "510300.csv", stock_rows)  # ETF -> 可交易
+    _write_csv(csv_root / "SZ" / "202401" / "20240102" / "900001.csv", stock_rows)  # B 股 -> 被排除
 
 
 def test_tick_import_routes_and_matches_legacy_schemas(tmp_path):
@@ -1102,14 +1100,14 @@ def test_tick_import_routes_and_matches_legacy_schemas(tmp_path):
     from data.downloader.tick_import import import_date_range
 
     imported = import_date_range(csv_root, root, start="20240102", end="20240102")
-    assert imported == 4  # the B-share CSV is excluded
+    assert imported == 4  # B 股 CSV 会被排除
 
     day_dir = root / "2024" / "0102"
     stock = pl.read_parquet(day_dir / "stock.parquet")
     tradable = pl.read_parquet(day_dir / "tradable.parquet")
     index = pl.read_parquet(day_dir / "index.parquet")
 
-    # stock: exact 28-column legacy layout in order
+    # stock：按顺序的确切 28 列旧版布局
     assert list(stock.columns) == [
         "time", "pr", "vol", "total_vol", "amount",
         "b1p", "b1v", "b2p", "b2v", "b3p", "b3v", "b4p", "b4v", "b5p", "b5v",
@@ -1124,18 +1122,18 @@ def test_tick_import_routes_and_matches_legacy_schemas(tmp_path):
         assert schema[col] == pl.Int64, col
     assert schema["flag"] == pl.Int64
 
-    # vendor units preserved (no x100, no yuan conversion)
+    # 厂商单位原样保留（无 x100，无元转换）
     row = stock.filter(pl.col("time") == "09:30:00")
     assert row["vol"][0] == 10
     assert row["total_vol"][0] == 10
     assert row["amount"][0] == 9290
 
-    # flag semantics: 0 opening auction, 1 continuous, 2 closing auction
+    # flag 语义：0 开盘集合竞价，1 连续竞价，2 收盘集合竞价
     assert stock.filter(pl.col("time") == "09:15:00")["flag"][0] == 0
     assert stock.filter(pl.col("time") == "09:30:00")["flag"][0] == 1
     assert stock.filter(pl.col("time") == "14:57:00")["flag"][0] == 2
 
-    # tradable: same 28 columns, all numerics Float64, flag Int32
+    # tradable：同样的 28 列，数值列全为 Float64，flag 为 Int32
     assert list(tradable.columns) == list(stock.columns)
     t_schema = dict(zip(tradable.columns, tradable.dtypes))
     for col in ("pr", "vol", "amount", "b1v", "s5v"):
@@ -1143,7 +1141,7 @@ def test_tick_import_routes_and_matches_legacy_schemas(tmp_path):
     assert t_schema["flag"] == pl.Int32
     assert set(tradable["code"]) == {"510300.SZ"}
 
-    # index: 6 columns, code first, numerics Float64
+    # index：6 列，code 在最前，数值列全为 Float64
     assert list(index.columns) == ["code", "time", "pr", "vol", "total_vol", "amount"]
     i_schema = dict(zip(index.columns, index.dtypes))
     assert all(i_schema[c] == pl.Float64 for c in ("pr", "vol", "total_vol", "amount"))
@@ -1192,7 +1190,7 @@ REAL_VOLUME = Path("E:/ProgramData")
     reason="USB data volume not mounted",
 )
 def test_tick_stock_schema_isomorphic_with_real_volume(tmp_path):
-    """The ingested stock.parquet must be schema-identical to the real volume file."""
+    """导入的 stock.parquet 必须与真实卷文件的结构一致。"""
     csv_root = tmp_path / "csv"
     root = tmp_path / "ProgramData"
     _build_csv_volume(csv_root)
@@ -1207,12 +1205,12 @@ def test_tick_stock_schema_isomorphic_with_real_volume(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# legacy-volume migration
+# 旧版卷迁移
 # ---------------------------------------------------------------------------
 
 
 def _build_legacy_volume(root: Path) -> None:
-    """A miniature pre-consolidation volume: global/yearly parquet + tick day."""
+    """微型整合前卷：全局/年度 parquet + 逐笔日。"""
     def write(frame: pd.DataFrame, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         frame.to_parquet(path, index=False)
@@ -1249,7 +1247,7 @@ def _build_legacy_volume(root: Path) -> None:
         pd.DataFrame({"ts_code": [INSTRUMENT], "trade_date": ["20240102"], "pe_ttm": [3.68]}),
         root / "2024" / "daily_basic.parquet",
     )
-    # a tick day keeps its directory; index_member migrates into the year db
+    # 逐笔日保留其目录；index_member 迁移进年度库
     write(
         pd.DataFrame({"index_code": ["399006.SZ"], "con_code": [INSTRUMENT],
                       "trade_date": ["20240102"], "weight": [0.85]}),
@@ -1260,7 +1258,7 @@ def _build_legacy_volume(root: Path) -> None:
                       "amount": [93000], "bs": ["B"], "code": [INSTRUMENT], "flag": [1]}),
         root / "2024" / "0102" / "stock.parquet",
     )
-    # a year without daily directories: bars stay db-only after migration
+    # 无每日目录的年份：迁移后 K线仅存于数据库
     write(
         pd.DataFrame(
             {
@@ -1280,22 +1278,22 @@ def test_migration_converts_validates_and_deletes(tmp_path):
     root = tmp_path / "ProgramData"
     _build_legacy_volume(root)
 
-    # dry run: convert + validate, keep every legacy parquet
+    # 试运行：转换 + 校验，保留所有旧版 parquet
     report = migrate_volume(root, apply=False)
     assert report.ok(), report.failures
     assert (root / "reference.duckdb").is_file()
     assert (root / "2024" / "year.duckdb").is_file()
-    assert (root / "2024" / "kline.parquet").is_file()  # untouched on dry run
-    assert (root / "2024" / "0102" / "stock.parquet").is_file()  # tick volume untouched
+    assert (root / "2024" / "kline.parquet").is_file()  # 试运行时保持不变
+    assert (root / "2024" / "0102" / "stock.parquet").is_file()  # 逐笔卷不变
 
     trade_date = read_duckdb_table(root / REFERENCE_DB, "trade_date")
     assert list(trade_date["cal_date"]) == ["20240101", "20240102"]
 
     kline = read_duckdb_table(root / "2024" / "year.duckdb", "kline")
     base = kline[kline["timeframe"] == "1d"]
-    assert len(base) == 2  # both days packed from the yearly file
+    assert len(base) == 2  # 两个交易日都从年度文件打包而来
     assert set(kline["timeframe"]) == {"1d", "5d", "10d"}
-    # the tick day gains its daily kline mirror
+    # 逐笔日获得其每日 kline 镜像
     assert (root / "2024" / "0102" / "kline.parquet").is_file()
 
     member = read_duckdb_table(root / "2024" / "year.duckdb", "index_member")
@@ -1304,7 +1302,7 @@ def test_migration_converts_validates_and_deletes(tmp_path):
     kline_2023 = read_duckdb_table(root / "2023" / "year.duckdb", "kline")
     assert len(kline_2023[kline_2023["timeframe"] == "1d"]) == 1
 
-    # apply: legacy parquet files are deleted, tick volume and dbs survive
+    # apply：删除旧版 parquet，逐笔卷与数据库保留
     report = migrate_volume(root, apply=True)
     assert report.ok(), report.failures
     assert not (root / "trade_date.parquet").exists()
@@ -1313,13 +1311,13 @@ def test_migration_converts_validates_and_deletes(tmp_path):
     assert not (root / "2024" / "daily_basic.parquet").exists()
     assert not (root / "2024" / "0102" / "index_member.parquet").exists()
     assert not (root / "2023" / "kline.parquet").exists()
-    # tick parquet survives
+    # 逐笔 parquet 保留
     assert (root / "2024" / "0102" / "stock.parquet").is_file()
-    # the daily directory keeps exactly the tick volume + the daily kline mirror
+    # 每日目录恰好保留逐笔卷 + 每日 kline 镜像
     assert sorted(p.name for p in (root / "2024" / "0102").iterdir()) == [
         "kline.parquet", "stock.parquet",
     ]
 
-    # idempotent: re-migrating finds nothing left to convert
+    # 幂等：重新迁移找不到任何待转换内容
     rerun = migrate_volume(root, apply=True)
     assert rerun.ok(), rerun.failures

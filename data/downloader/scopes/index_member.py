@@ -1,10 +1,9 @@
-"""Index membership (weights) fetcher (legacy scope ``index/member``).
+"""指数成分（权重）获取器（旧作用域 ``index/member``）。
 
-Calls the vendor ``index_weight`` interface per index code and lands each
-trading day's constituent rows in ``{year}/year.duckdb`` table
-``index_member`` (``index_code``/``con_code``/``trade_date``/``weight``,
-deduplicated on ``index_code``+``con_code``+``trade_date``).  The legacy
-per-day ``index_member.parquet`` files are consolidated into the yearly table.
+按每个指数代码调用厂商 ``index_weight`` 接口，将每个交易日的成分股行写入
+``{year}/year.duckdb`` 表的 ``index_member``（``index_code``/``con_code``/``trade_date``/``weight``，
+按 ``index_code``+``con_code``+``trade_date`` 去重）。旧版按日的 ``index_member.parquet`` 文件
+被合并进年度表。
 """
 
 from __future__ import annotations
@@ -38,7 +37,7 @@ def fetch_index_member(
     sleep: float = 0.3,
     **options: Any,
 ) -> pd.DataFrame:
-    """Fetch constituent weights for the configured index codes."""
+    """拉取配置的指数代码的成分股权重。"""
     index_codes = options.get("index_codes") or DEFAULT_INDEXES
     max_retries = options.get("max_retries", 3)
 
@@ -76,7 +75,7 @@ def write_index_member(
     frame: pd.DataFrame,
     **options: Any,
 ) -> list[Path]:
-    """Custom writer: ``{root}/{year}/year.duckdb`` table ``index_member`` by ``trade_date``."""
+    """自定义写入器：按 ``trade_date`` 写入 ``{root}/{year}/year.duckdb`` 表的 ``index_member``。"""
     if frame.empty:
         return []
     if "trade_date" not in frame.columns:

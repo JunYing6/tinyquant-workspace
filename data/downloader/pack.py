@@ -1,22 +1,21 @@
-"""Kline packing: per-day bar files -> the yearly ``kline`` duckdb table.
+"""Kline 打包：按日 bar 文件 -> 年度 ``kline`` duckdb 表。
 
-The daily bar scopes (``trade_data/daily``, ``index/daily``, ``fund/daily``)
-land each trading day's vendor rows at ``{year}/{MMDD}/kline.parquet`` — the
-raw layer.  This module packs those files into ``{year}/year.duckdb`` table
-``kline`` (the layout the ``market.bar`` adapters read) and derives the
-multi-day timeframes (5d/10d) from the 1d rows:
+日线类 scope（``trade_data/daily``、``index/daily``、``fund/daily``）
+将每个交易日的厂商行落到 ``{year}/{MMDD}/kline.parquet``——即原始层。
+本模块将这些文件打包进 ``{year}/year.duckdb`` 的 ``kline`` 表
+（``market.bar`` 适配器读取的布局），并从 1d 行派生出多日周期（5d/10d）：
 
-- per instrument (``data_type`` + ``ts_code``), the year's 1d rows sorted by
-  ``trade_date`` are chunked into consecutive blocks of N trading days;
-- each block aggregates to one row: open = first open, high/low = extremes,
-  close = last close, vol/amount = sums, ``trade_date`` = block's last day,
-  ``adj_factor``/``name`` = block's last row, ``pre_close`` = previous block's
-  close (NaN for the first block), ``pct_chg``/``change`` recomputed;
-- ``timeframe`` is ``"5d"``/``"10d"``.
+- 对每个标的（``data_type`` + ``ts_code``），将当年按 ``trade_date``
+  排序的 1d 行切分成连续每 N 个交易日的分组；
+- 每个分组聚合成一行：open = 首日开盘，high/low = 极值，
+  close = 末日收盘，vol/amount = 求和，``trade_date`` = 分组最后一天，
+  ``adj_factor``/``name`` = 分组最后一行，``pre_close`` = 前一组的收盘
+  （首组为 NaN），``pct_chg``/``change`` 重新计算；
+- ``timeframe`` 为 ``"5d"``/``"10d"``。
 
-Packing is idempotent: 1d rows are merged from the daily files (business key
-``ts_code``+``trade_date``+``data_type``+``timeframe``, keep last), derived
-timeframes are recomputed from scratch, and the table is replaced atomically.
+打包是幂等的：1d 行从日线文件合并而来（业务键
+``ts_code``+``trade_date``+``data_type``+``timeframe``，保留最后一条），
+派生周期从头重新计算，表整体原子替换。
 """
 
 from __future__ import annotations
@@ -44,10 +43,10 @@ def pack_kline(
     *,
     derived_timeframes: tuple[tuple[str, int], ...] = DERIVED_TIMEFRAMES,
 ) -> Path:
-    """Pack ``{root}/{year}/{MMDD}/kline.parquet`` into ``{root}/{year}/year.duckdb``.
+    """将 ``{root}/{year}/{MMDD}/kline.parquet`` 打包进 ``{root}/{year}/year.duckdb``。
 
-    Returns the duckdb path.  Safe to re-run any time; the 1d rows are merged
-    from the daily files and the multi-day rows are recomputed.
+    返回 duckdb 路径。可随时安全重跑；1d 行从日线文件合并，
+    多日行重新计算。
     """
     year_dir = Path(root) / str(year)
     db_path = year_dir / "year.duckdb"
@@ -88,7 +87,7 @@ def pack_kline(
 
 
 def _merge_base_1d(db_path: Path, file_rows: pd.DataFrame) -> pd.DataFrame:
-    """Existing table's 1d rows merged with the daily-file rows (keep last)."""
+    """将已有表中的 1d 行与日线文件行合并（保留最后一条）。"""
     if not db_path.is_file():
         return file_rows
     con = duckdb.connect(str(db_path), read_only=True)
@@ -109,7 +108,7 @@ def _merge_base_1d(db_path: Path, file_rows: pd.DataFrame) -> pd.DataFrame:
 
 
 def derive_multi_day_bars(base_1d: pd.DataFrame, size: int) -> pd.DataFrame:
-    """Aggregate 1d rows into consecutive N-trading-day blocks per instrument."""
+    """将 1d 行按标的聚合成连续每 N 个交易日的分组。"""
     if base_1d.empty:
         return pd.DataFrame()
     required = {"ts_code", "trade_date", "data_type", "open", "high", "low", "close"}
@@ -119,7 +118,7 @@ def derive_multi_day_bars(base_1d: pd.DataFrame, size: int) -> pd.DataFrame:
 
     frame = base_1d.copy()
     frame["trade_date"] = frame["trade_date"].astype("string")
-    frame = frame[frame["trade_date"].notna()]  # undated rows cannot form bars
+    frame = frame[frame["trade_date"].notna()]  # 无日期的行无法组成 bar
     frame = frame.sort_values(["data_type", "ts_code", "trade_date"])
 
     rows: list[dict] = []

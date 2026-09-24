@@ -1,10 +1,8 @@
-"""SHIBOR fetcher (legacy scope ``trade_data/shibor``).
+"""SHIBOR 获取器（旧作用域 ``trade_data/shibor``）。
 
-Calls the vendor ``shibor`` interface per month and lands the raw wide table
-at ``{year}/shibor.parquet`` (``date`` + ``on``/``1w``/.../``1y`` tenors in
-vendor percentage points).  The wide->long (observation_date, term, rate)
-reshaping is declared in the ``market.shibor`` mapping and happens in the
-adapters.
+按月调用厂商 ``shibor`` 接口，将原始宽表写入 ``{year}/shibor.parquet``（``date`` 及
+``on``/``1w``/.../``1y`` 各期限，厂商百分点单位）。宽表转长表（observation_date, term, rate）的
+重构在 ``market.shibor`` 映射中声明，并发生在适配层。
 """
 
 from __future__ import annotations
@@ -28,7 +26,7 @@ def fetch_shibor(
     sleep: float = 0.0,
     **options: Any,
 ) -> pd.DataFrame:
-    """Fetch SHIBOR quotes for every month in the range."""
+    """按区间内的每个月拉取 SHIBOR 报价。"""
     max_retries = options.get("max_retries", 3)
     all_rows: list[pd.DataFrame] = []
 

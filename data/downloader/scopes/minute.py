@@ -1,10 +1,8 @@
-"""Intraday (stk_mins) bars fetcher (legacy scope ``trade_data/minute``).
+"""分钟线（stk_mins）获取器（旧作用域 ``trade_data/minute``）。
 
-Calls the vendor ``stk_mins`` interface per instrument code and lands the raw
-rows in ``{year}/year.duckdb`` table ``minute_{freq}`` (e.g. ``minute_30min``,
-deduplicated on ``ts_code``+``trade_time``).  The layout has no
-MigrationMapping template in the release catalog, so the scope registers a
-custom writer instead of the mapping-driven one.  Vendor fields stay raw.
+按每个标的代码调用厂商 ``stk_mins`` 接口，将原始行写入 ``{year}/year.duckdb`` 表的
+``minute_{freq}``（如 ``minute_30min``，按 ``ts_code``+``trade_time`` 去重）。发布目录中该布局
+没有 MigrationMapping 模板，因此本作用域注册自定义写入器而非映射驱动的写入器。厂商字段保持原样。
 """
 
 from __future__ import annotations
@@ -29,7 +27,7 @@ def fetch_minute(
     sleep: float = 0.3,
     **options: Any,
 ) -> pd.DataFrame:
-    """Fetch intraday bars for ``codes`` (required option) at ``freq``."""
+    """按 ``freq`` 拉取 ``codes``（必填选项）的分钟线。"""
     codes = options.get("codes")
     freq = options.get("freq", "30min")
     max_retries = options.get("max_retries", 3)
@@ -74,7 +72,7 @@ def write_minute(
     freq: str = "30min",
     **options: Any,
 ) -> list[Path]:
-    """Custom writer: ``{root}/{year}/year.duckdb`` table ``minute_{freq}`` by ``trade_time``."""
+    """自定义写入器：按 ``trade_time`` 写入 ``{root}/{year}/year.duckdb`` 表的 ``minute_{freq}``。"""
     if frame.empty:
         return []
     if "trade_time" not in frame.columns:

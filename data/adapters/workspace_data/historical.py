@@ -1,17 +1,17 @@
-"""Historical and calendar adapters over the consolidated workspace volume.
+"""基于整合后工作区数据卷的历史与日历适配器。
 
-``WorkspaceParquetAdapter`` serves the phase-1 table/bar datasets:
+``WorkspaceParquetAdapter`` 提供一期表/bar 数据集：
 
-- ``market.bar`` / ``index.bar`` / ``fund.bar`` (yearly ``year.duckdb#kline``,
-  dispatched by the ``data_type`` column; 1d and multi-day timeframes)
-- ``market.daily_metric`` (``year.duckdb#daily_basic``)
-- ``instrument.master`` (``reference.duckdb#stock_basic``)
-- ``industry.membership`` (``reference.duckdb#sw_industry``)
+- ``market.bar`` / ``index.bar`` / ``fund.bar``（按年 ``year.duckdb#kline``，
+  由 ``data_type`` 列分派；1d 与多日周期）
+- ``market.daily_metric``（``year.duckdb#daily_basic``）
+- ``instrument.master``（``reference.duckdb#stock_basic``）
+- ``industry.membership``（``reference.duckdb#sw_industry``）
 
-``WorkspaceCalendarAdapter`` serves ``calendar.session`` from
-``reference.duckdb#trade_date``.
+``WorkspaceCalendarAdapter`` 从 ``reference.duckdb#trade_date`` 提供
+``calendar.session``。
 
-All conversions follow ``adapters/workspace_data/mappings.py``.
+所有转换遵循 ``adapters/workspace_data/mappings.py``。
 """
 
 from __future__ import annotations
@@ -58,8 +58,8 @@ SCHEMA_VERSION = "1"
 SOURCE = "workspace-parquet"
 
 _BAR_ALIASES = {"ts_code": "instrument_id", "trade_date": "trading_date", "vol": "volume", "amount": "turnover"}
-_BAR_CONVERSIONS = {"volume": 100.0, "turnover": 1000.0}  # lots -> shares, thousand-yuan -> yuan
-_INDEX_VOLUME_FACTOR = 1.0  # index quantity keeps the source-native unit (see mappings)
+_BAR_CONVERSIONS = {"volume": 100.0, "turnover": 1000.0}  # 手 -> 股，千元 -> 元
+_INDEX_VOLUME_FACTOR = 1.0  # 指数量保留数据源原生单位（参见 mappings）
 _METRIC_CONVERSIONS = {
     "total_mv": 10000.0,
     "circ_mv": 10000.0,
@@ -77,8 +77,8 @@ def _capability(
     point_in_time: bool | None = None,
 ) -> DatasetCapability:
     definition = default_catalog().get(dataset)
-    # Strategy requests always carry an injected as_of (pipeline), so adapters
-    # serving them must declare PIT capability and honour the bound.
+    # 策略请求始终携带注入的 as_of（pipeline），因此服务此类请求的适配器
+    # 必须声明 PIT 能力并遵守该约束。
     pit = definition.point_in_time if point_in_time is None else point_in_time
     return DatasetCapability(
         dataset=dataset,
@@ -122,7 +122,7 @@ def _batch(
 
 
 class WorkspaceCalendarAdapter:
-    """Serves ``calendar.session`` from ``reference.duckdb#trade_date``."""
+    """从 ``reference.duckdb#trade_date`` 提供 ``calendar.session``。"""
 
     def __init__(self, data_root: str | Path, market: str = MARKET) -> None:
         self._root = Path(data_root)
@@ -165,7 +165,7 @@ class WorkspaceCalendarAdapter:
 
 
 class WorkspaceBarAdapter:
-    """Serves the bar family (market.bar / index.bar / fund.bar). Non-PIT."""
+    """提供 bar 系列（market.bar / index.bar / fund.bar）。非 PIT。"""
 
     DATASETS = ("market.bar", "index.bar", "fund.bar")
 
@@ -198,7 +198,7 @@ class WorkspaceBarAdapter:
         yield self.read(request)
 
     def _resolve_range(self, request: DataRequest) -> tuple[date | None, date | None]:
-        """Resolve start/end dates, translating anchor + session_window via the calendar."""
+        """解析起止日期，通过日历把 anchor + session_window 换算为具体区间。"""
         if request.start is not None or request.end is not None:
             return request.start, request.end
         anchor = request.anchor
@@ -234,7 +234,7 @@ class WorkspaceBarAdapter:
             self._open_days_cache = sorted(days)
         return self._open_days_cache
 
-    # -- bar family ---------------------------------------------------------
+    # -- bar 系列 -----------------------------------------------------------
 
     def _read_bars(self, request: DataRequest) -> DataBatch:
         view = request.dataset
@@ -250,23 +250,23 @@ class WorkspaceBarAdapter:
         end_s = to_yyyymmdd(end_d) if end_d is not None else None
         for db_path in files:
             frame = read_table(db_path, "kline").rename(columns=_BAR_ALIASES)
-            # the packed kline table carries multi-day timeframes (5d/10d);
-            # this adapter serves the daily bar view unless asked otherwise
+            # 打包的 kline 表包含多日周期（5d/10d）；
+            # 除非另行指定，本适配器仅提供日线 bar 视图
             frame = frame[frame["timeframe"] == (request.frequency or "1d")]
             if wanted_asset is not None:
                 frame = frame[frame["data_type"].map(ASSET_TYPE_MAP) == wanted_asset]
             if request.instruments is not None:
                 frame = frame[frame["instrument_id"].isin(request.instruments)]
-            # Daily bars use interval-overlap semantics (mirrors the release
-            # reference adapter): the engine requests [session.open, session.close]
-            # of one day, so both bounds are inclusive on trading_date.
+            # 日线 bar 采用区间重叠语义（与发布版参考适配器一致）：引擎请求
+            # 某一天的 [session.open, session.close]，因此在 trading_date 上
+            # 两个边界均为包含（inclusive）。
             if start_s is not None:
                 frame = frame[frame["trading_date"] >= start_s]
             if end_s is not None:
                 frame = frame[frame["trading_date"] <= end_s]
             before = len(frame)
-            # ETFs are stored under both stock and fund data_type; the
-            # market.bar primary key has no asset_type, so dedupe at the edge.
+            # ETF 同时以 stock 与 fund 两种 data_type 存储；market.bar 主键
+            # 不含 asset_type，因此在边界处去重。
             frame = frame.drop_duplicates(subset=["instrument_id", "trading_date", "timeframe"], keep="first")
             dropped += before - len(frame)
             for row in frame.to_dict("records"):
@@ -275,16 +275,14 @@ class WorkspaceBarAdapter:
                     continue
                 prices = [row.get(c) for c in ("open", "high", "low", "close")]
                 if any(v is None or v != v for v in prices):
-                    continue  # suspended/no-trade rows carry no OHLC fact
+                    continue  # 停牌/无成交的行不含 OHLC 事实
                 data_type = str(row.get("data_type"))
                 asset_type = ASSET_TYPE_MAP.get(data_type, data_type)
                 volume_factor = _INDEX_VOLUME_FACTOR if asset_type == "index" else _BAR_CONVERSIONS["volume"]
                 interval_start, interval_end = session_bounds(trading_date)
-                # BAR_PIT: market data has no announcement delay, and the fast
-                # replay asks for the CURRENT session's bar with as_of at the
-                # decision time (session open) — visibility is scoped by the
-                # request's session bounds, not by available_at.  available_at
-                # stays at the session close for provenance.
+                # BAR_PIT：行情数据无公告延迟，快速回放以决策时刻（开盘）的
+                # as_of 请求当前会话的 bar——可见性由请求的会话边界界定，
+                # 而非 available_at。available_at 保留在收盘时刻用于溯源。
                 raw_volume = row.get("volume")
                 raw_turnover = row.get("turnover")
                 records.append(
@@ -326,11 +324,11 @@ class WorkspaceBarAdapter:
             )
         return _batch(ADAPTER_NAME, revision, request, view, tuple(records), warnings=warnings)
 
-    # -- daily metric -------------------------------------------------------
+    # -- 每日估值指标 ---------------------------------------------------------
 
 
 class WorkspaceTableAdapter:
-    """Serves the PIT table datasets (daily metric, master data, membership)."""
+    """提供 PIT 表数据集（每日估值指标、master 数据、成分归属）。"""
 
     DATASETS = ("market.daily_metric", "instrument.master", "industry.membership")
 
@@ -411,7 +409,7 @@ class WorkspaceTableAdapter:
         records.sort(key=lambda r: (r["instrument_id"], r["trading_date"]))
         return _batch(TABLE_ADAPTER_NAME, revision, request, "market.daily_metric", tuple(records))
 
-    # -- instrument master --------------------------------------------------
+    # -- 标的 master ---------------------------------------------------------
 
     def _read_instruments(self, request: DataRequest) -> DataBatch:
         db_path = self._root / REFERENCE_DB
@@ -450,7 +448,7 @@ class WorkspaceTableAdapter:
         records.sort(key=lambda r: (r["instrument_id"], r["valid_from"] or date.min))
         return _batch(TABLE_ADAPTER_NAME, source_revision([db_path]), request, "instrument.master", tuple(records))
 
-    # -- industry membership ------------------------------------------------
+    # -- 行业成分 -------------------------------------------------------------
 
     def _read_industry(self, request: DataRequest) -> DataBatch:
         db_path = self._root / REFERENCE_DB

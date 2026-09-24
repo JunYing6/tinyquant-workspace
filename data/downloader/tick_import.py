@@ -1,36 +1,34 @@
-"""Tick CSV ingestion (legacy scope ``trade_data/tick``), polars-accelerated.
+"""分笔 CSV 导入（旧版 scope ``trade_data/tick``），polars 加速。
 
-Ports the legacy ``import_tick_from_csv_fast`` pipeline: raw per-instrument
-trade CSVs (GBK, one file per instrument per day, exported from the vendor's
-zip dumps) are parsed with polars and landed per trading day at
-``{root}/{year}/{MMDD}/{stock,tradable,index}.parquet``.
+移植自旧版 ``import_tick_from_csv_fast`` 流水线：用 polars 解析每个标的
+的原始成交 CSV（GBK，每个标的每天一个文件，从厂商 zip 包导出），
+并按交易日落到 ``{root}/{year}/{MMDD}/{stock,tradable,index}.parquet``。
 
-The output schemas are byte-for-byte compatible with the existing volume
-(dtypes verified against real ``E:/ProgramData`` files):
+输出 schema 与现有卷逐字节兼容（dtype 已对照真实 ``E:/ProgramData``
+文件验证）：
 
-- ``stock.parquet``    28 columns ``time, pr, vol, total_vol, amount,
-  b1p..b5p, b1v..b5v, s1p..s5p, s1v..s5v, bs, code, flag``; prices are
-  Float64, quantities/amount Int64, ``flag`` Int64.
-- ``tradable.parquet`` same 28 columns; numerics Float64, ``flag`` Int32.
-- ``index.parquet``    6 columns ``code, time, pr, vol, total_vol, amount``,
-  numerics Float64.
+- ``stock.parquet``    28 列 ``time, pr, vol, total_vol, amount,
+  b1p..b5p, b1v..b5v, s1p..s5p, s1v..s5v, bs, code, flag``；价格用 Float64，
+  量/额为 Int64，``flag`` 用 Int64。
+- ``tradable.parquet`` 同样 28 列；数值用 Float64，``flag`` 用 Int32。
+- ``index.parquet``    6 列 ``code, time, pr, vol, total_vol, amount``，
+  数值用 Float64。
 
-Units stay vendor-native: ``vol``/``total_vol`` are raw quote-machine lots
-increments/cumulative, ``amount`` is raw yuan — the lots->shares conversion
-for equities lives in the ``market.trade``/``market.quote`` adapters.
+单位保持厂商原生：``vol``/``total_vol`` 为原始行情机手的增量/累计量，
+``amount`` 为原始人民币金额——股票的手->股换算位于
+``market.trade``/``market.quote`` 适配器。
 
-``flag`` semantics: 0 = opening call auction (``total_vol == 0``), 1 =
-continuous session, 2 = closing call auction (stocks only: 14:56:30-15:00:30
-with ``vol == 0``).
+``flag`` 语义：0 = 开盘集合竞价（``total_vol == 0``），1 =
+连续竞价，2 = 收盘集合竞价（仅股票：14:56:30-15:00:30 且 ``vol == 0``）。
 
-Usage (library)::
+用法（库）::
 
     from data.downloader import TushareDownloader
     downloader = TushareDownloader(client=object(), root="E:/ProgramData")
     downloader.download("trade_data/tick", "20240102", "20240131",
                         options={"csv_root": "E:/2024"})
 
-Usage (CLI)::
+用法（CLI）::
 
     python -m data.downloader.tick_import --input E:/2024 --month 202401
 """
@@ -48,7 +46,7 @@ import polars as pl
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# instrument-code routing tables (ported verbatim from the legacy importer)
+# 代码路由表（逐字移植自旧版导入器）
 # ---------------------------------------------------------------------------
 
 # A 股代码前缀（导入到 stock.parquet）
@@ -88,8 +86,8 @@ ALL_TRADABLE_PREFIXES = (
 )
 
 # 指数代码前缀（导入到 index.parquet）
-INDEX_PREFIXES_SH = ("000",)  # 000xxx.SH
-INDEX_PREFIXES_SZ = ("399",)  # 399xxx.SZ
+INDEX_PREFIXES_SH = ("000",)  # 如 000xxx.SH
+INDEX_PREFIXES_SZ = ("399",)  # 如 399xxx.SZ
 
 # 不导入的代码前缀
 EXCLUDED_PREFIXES_SH = ("900", "502", "751", "753", "755", "888")  # B股、分级基金、封闭式基金等
@@ -97,7 +95,7 @@ EXCLUDED_PREFIXES_SZ = ("200",)  # B股
 ALL_EXCLUDED_PREFIXES = EXCLUDED_PREFIXES_SH + EXCLUDED_PREFIXES_SZ
 
 # ---------------------------------------------------------------------------
-# output schemas (verified against real E:/ProgramData files)
+# 输出 schema（已对照真实 E:/ProgramData 文件验证）
 # ---------------------------------------------------------------------------
 
 STOCK_COLUMNS = [
@@ -108,7 +106,7 @@ STOCK_COLUMNS = [
 ]
 INDEX_COLUMNS = ["code", "time", "pr", "vol", "total_vol", "amount"]
 
-# stock.parquet: prices Float64, quantities/amount Int64 (matches the volume)
+# stock.parquet：价格 Float64、量/额 Int64（与卷一致）
 STOCK_PRICE_COLUMNS = ("pr", "b1p", "b2p", "b3p", "b4p", "b5p", "s1p", "s2p", "s3p", "s4p", "s5p")
 STOCK_QUANTITY_COLUMNS = (
     "vol", "total_vol", "amount",
@@ -189,7 +187,7 @@ def get_code_type(pure_code: str, exchange_suffix: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# CSV -> per-day frames
+# CSV -> 按日数据帧
 # ---------------------------------------------------------------------------
 
 
@@ -198,7 +196,7 @@ def import_single_csv(
     exchange_suffix: str,
     etf_only: bool = False,
 ) -> Optional[pl.DataFrame]:
-    """Import one instrument CSV into a typed frame (None when skipped)."""
+    """导入一个标的的 CSV 为带类型的数据帧（跳过时返回 None）。"""
     pure_code = csv_path.stem.split("_")[0]
     code_type = get_code_type(pure_code, exchange_suffix)
     if code_type == "exclude":
@@ -297,7 +295,7 @@ def _flag_expr(code_type: str) -> pl.Expr:
 
 
 # ---------------------------------------------------------------------------
-# per-day persistence
+# 按日持久化
 # ---------------------------------------------------------------------------
 
 
@@ -306,7 +304,7 @@ def save_to_parquet(
     output_path: str | Path,
     append: bool = False,
 ) -> None:
-    """Save a frame to parquet (zstd); append mode dedupes on (code, time)."""
+    """将数据帧保存为 parquet（zstd）；追加模式按 (code, time) 去重。"""
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -331,19 +329,19 @@ def import_date_range(
     etf_only: bool = False,
     smart_route: bool = True,
 ) -> int:
-    """Import tick CSVs under ``csv_root`` into the per-day parquet layout.
+    """将 ``csv_root`` 下的分笔 CSV 导入到按日 parquet 布局。
 
     Args:
-        csv_root: directory holding the vendor month dirs (``.../SH/202401/20240102/*.csv``)
-        output_root: raw parquet volume root
-        start/end: inclusive YYYYMMDD filter for the scope-based entry point
-        month: import a single YYYYMM month (``None`` + no start/end = first found month)
-        append: merge into existing per-day files (dedupe on code+time)
-        etf_only: only import ETF/fund instruments
-        smart_route: route by instrument code (False: everything to stock.parquet)
+        csv_root: 存放厂商月份目录的目录（``.../SH/202401/20240102/*.csv``）
+        output_root: 原始 parquet 卷根目录
+        start/end: 供 scope 入口使用的闭区间 YYYYMMDD 过滤
+        month: 只导入单个 YYYYMM 月（``None`` + 无 start/end = 找到的第一个月）
+        append: 合并进现有按日文件（按 code+time 去重）
+        etf_only: 只导入 ETF/基金类标的
+        smart_route: 按标的代码路由（False：全部进入 stock.parquet）
 
     Returns:
-        Number of CSV files imported.
+        已导入的 CSV 文件数量。
     """
     csv_root = Path(csv_root)
     date_dirs = _find_date_dirs(csv_root, month)
@@ -414,10 +412,10 @@ def import_date_range(
 
 
 def _find_date_dirs(csv_root: Path, month: Optional[str]) -> list[Path]:
-    """Locate YYYYMMDD directories under the vendor month layout (two nesting depths).
+    """在厂商月份布局下定位 YYYYMMDD 目录（两层嵌套深度）。
 
-    The month dir is the date directory's direct parent; when ``month`` is
-    given only date dirs whose parent parses to that YYYYMM are returned.
+    月份目录是日期目录的直接父目录；给定 ``month`` 时，仅返回父目录
+    解析为该 YYYYMM 的日期目录。
     """
     for depth in (1, 2):
         found: list[Path] = []
@@ -467,12 +465,12 @@ def scan_available_months(input_dir: str | Path) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# registry adapters (legacy scope ``trade_data/tick``)
+# 注册表适配器（旧版 scope ``trade_data/tick``）
 # ---------------------------------------------------------------------------
 
 
 def fetch_tick_import(client: Any, start: str, end: str, *, csv_root: str | None = None, **options: Any) -> None:
-    """Validate the CSV source; the actual work happens in ``write_tick_import``."""
+    """校验 CSV 源；实际工作在 ``write_tick_import`` 中完成。"""
     if csv_root is None:
         raise ValueError(
             "trade_data/tick ingests vendor CSV dumps, not a Tushare interface; "
@@ -493,7 +491,7 @@ def write_tick_import(
     smart_route: bool = True,
     **options: Any,
 ) -> list[Path]:
-    """Run the CSV ingestion against the writer's volume root."""
+    """针对写入器的卷根目录运行 CSV 导入。"""
     if csv_root is None:
         raise ValueError("trade_data/tick requires the 'csv_root' option")
     import_date_range(
@@ -505,8 +503,8 @@ def write_tick_import(
         etf_only=etf_only,
         smart_route=smart_route,
     )
-    # touched files are discovered by the caller from the volume if needed;
-    # return the per-day files actually present in the written range
+    # 如需，调用方可从卷中自行发现受影响的文件；
+    # 这里返回所写区间内实际存在的按日文件
     root = Path(writer.root)
     return sorted(
         path
@@ -517,7 +515,7 @@ def write_tick_import(
 
 
 # ---------------------------------------------------------------------------
-# CLI
+# 命令行接口
 # ---------------------------------------------------------------------------
 
 

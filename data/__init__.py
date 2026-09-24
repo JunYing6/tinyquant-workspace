@@ -1,9 +1,9 @@
-"""Data domain of the user project.
+"""用户项目的数据域。
 
-Three responsibilities, one pipeline direction:
+三个职责，同一流水线方向：
 
-- ``data.downloader``   vendor API -> raw parquet volume (E:/ProgramData layout)
-- ``data.adapters``     raw volume -> standard ``tools.data`` gateway datasets
-- ``data.processing``   canonical datasets -> derived datasets (indicators etc.)
+- ``data.downloader``  厂商 API -> 原始 parquet 数据卷（E:/ProgramData 布局）
+- ``data.adapters``    原始数据卷 -> 标准 ``tools.data`` 网关数据集
+- ``data.processing``  标准数据集 -> 衍生数据集（指标等）
 """
 

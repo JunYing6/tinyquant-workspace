@@ -1,18 +1,14 @@
-"""Northbound per-stock net-buy fetcher (legacy scope ``trade_data/northbound``).
+"""北向个股净买入获取器（旧作用域 ``trade_data/northbound``）。
 
-Non-Tushare scope: the legacy ``northbound_netbuy.parquet`` comes from
-Eastmoney HSGT holdings via akshare (``stock_hsgt_individual_em``), walked per
-stock.  The Chinese column names are normalized to the legacy on-disk columns
-(``ts_code``/``trade_date``/``net_buy``/``net_buy_shares``/``hold_shares``/
-``hold_market_cap``/``close``/``pct_chg``) — that normalization reproduces the
-legacy layout this scope defined, values stay raw.  Rows are filtered to the
-requested range and landed at ``{year}/northbound_netbuy.parquet``.
+非 Tushare 作用域：旧版 ``northbound_netbuy.parquet`` 来自东方财富沪深港通持股，通过 akshare
+（``stock_hsgt_individual_em``）按个股抓取。中文列名被规范化为旧版磁盘列
+（``ts_code``/``trade_date``/``net_buy``/``net_buy_shares``/``hold_shares``/
+``hold_market_cap``/``close``/``pct_chg``）——该规范化复现的是本作用域定义的旧布局，
+值保持原样。行被过滤到请求的区间，并写入 ``{year}/northbound_netbuy.parquet``。
 
-The akshare module (or any object providing ``stock_hsgt_individual_em``) is
-injectable via the ``akshare`` option; without it the fetcher falls back to
-``import akshare``.  Candidate codes come from the ``codes`` option, else from
-``stock_info_a_code_name`` on the same module.  Northbound disclosure stopped
-2024-08-17, so the source is naturally bounded.
+akshare 模块（或任何提供 ``stock_hsgt_individual_em`` 的对象）可通过 ``akshare`` 选项注入；
+未注入时获取器回退到 ``import akshare``。候选代码来自 ``codes`` 选项，否则取自同一模块的
+``stock_info_a_code_name``。北向披露已于 2024-08-17 停止，因此该数据源有天然上界。
 """
 
 from __future__ import annotations
@@ -52,7 +48,7 @@ def fetch_northbound(
     sleep: float = 0.15,
     **options: Any,
 ) -> pd.DataFrame:
-    """Fetch per-stock northbound net-buy rows for the inclusive range."""
+    """按闭区间拉取个股北向净买入行。"""
     ak = options.get("akshare")
     if ak is None:
         try:

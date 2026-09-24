@@ -1,9 +1,7 @@
-"""Stock master fetcher (legacy scope ``stock/basic``).
+"""股票主表获取器（旧作用域 ``stock/basic``）。
 
-Calls the vendor ``stock_basic`` interface for all listed A-share instruments
-and lands the raw frame at ``{root}/stock_basic.parquet`` (global snapshot,
-deduplicated on ``ts_code``).  Vendor fields stay untouched: the
-``list_status`` L/D/P decoding happens in the adapters.
+调用厂商 ``stock_basic`` 接口获取全部已上市 A 股标的，将原始表写入 ``{root}/stock_basic.parquet``
+（全局快照，按 ``ts_code`` 去重）。厂商字段保持原样：``list_status`` 的 L/D/P 解码发生在适配层。
 """
 
 from __future__ import annotations
@@ -31,7 +29,7 @@ def fetch_stock_basic(
     sleep: float = 0.0,
     **options: Any,
 ) -> pd.DataFrame:
-    """Fetch the full listed-instrument master (start/end unused, snapshot scope)."""
+    """拉取完整的已上市标的主表（start/end 不使用，快照作用域）。"""
     list_status = options.get("list_status", "L")
     df = retry_call(
         client.stock_basic,

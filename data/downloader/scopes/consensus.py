@@ -1,17 +1,13 @@
-"""Consensus profit-forecast fetcher (legacy scope ``fina/consensus``).
+"""一致预期（盈利预测）获取器（旧作用域 ``fina/consensus``）。
 
-Non-Tushare scope: the legacy workspace sourced THS consensus forecasts via
-akshare (``stock_profit_forecast_ths``), walked per stock, and stored yearly
-rows (``ts_code``/``year``/``eps_mean``/``np_mean``) in the yearly duckdb
-table ``consensus_forecast``.  The release mapping marks ``fina/consensus``
-contract-only (no physical source the adapters serve — requests fail), so
-this scope registers a custom writer for the yearly table and exists to keep
-the download capability.
+非 Tushare 作用域：旧工作区通过 akshare（``stock_profit_forecast_ths``）按个股获取同花顺
+一致预期，并逐年存储行（``ts_code``/``year``/``eps_mean``/``np_mean``）到年度 duckdb 表
+``consensus_forecast``。发布映射把 ``fina/consensus`` 标记为仅契约（适配层无实际数据来源，
+请求会失败），因此本作用域为年度表注册了自定义写入器，其存在是为了保留下载能力。
 
-The akshare module is injectable via the ``akshare`` option (any object with
-``stock_profit_forecast_ths``); without it the fetcher falls back to
-``import akshare``.  Candidate codes come from the ``codes`` option, else from
-``stock_info_a_code_name`` on the same module.
+akshare 模块可通过 ``akshare`` 选项注入（任何带 ``stock_profit_forecast_ths`` 的对象）；
+未注入时获取器回退到 ``import akshare``。候选代码来自 ``codes`` 选项，否则取自同一模块的
+``stock_info_a_code_name``。
 """
 
 from __future__ import annotations
@@ -36,7 +32,7 @@ def fetch_consensus(
     sleep: float = 0.3,
     **options: Any,
 ) -> pd.DataFrame:
-    """Fetch per-stock consensus EPS/net-profit forecasts for future years."""
+    """按个股拉取未来年度的一致预期 EPS / 净利润预测。"""
     ak = options.get("akshare")
     if ak is None:
         try:
@@ -89,7 +85,7 @@ def fetch_consensus(
 
 
 def _parse_forecast(df: pd.DataFrame | None) -> dict[int, float]:
-    """Extract {year: mean-forecast} from a THS forecast frame (vendor layout)."""
+    """从同花顺预测表（厂商布局）中提取 {year: 平均预测}。"""
     if df is None or df.empty:
         return {}
     by_year: dict[int, float] = {}
@@ -107,7 +103,7 @@ def write_consensus(
     frame: pd.DataFrame,
     **options: Any,
 ) -> list[Path]:
-    """Custom writer: ``{root}/{year}/year.duckdb`` table ``consensus_forecast``."""
+    """自定义写入器：``{root}/{year}/year.duckdb`` 表的 ``consensus_forecast``。"""
     if frame.empty:
         return []
     frame = frame.copy()

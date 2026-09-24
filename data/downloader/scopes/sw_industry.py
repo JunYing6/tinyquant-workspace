@@ -1,10 +1,8 @@
-"""SW industry membership fetcher (legacy scope ``sw/industry``).
+"""申万行业成分获取器（旧作用域 ``sw/industry``）。
 
-Walks the 28 SW level-1 industry indexes and calls the vendor ``index_member``
-interface per industry, landing the raw membership rows at
-``{root}/sw_industry.parquet`` (``index_code``/``con_code``/``in_date``/
-``out_date``/``is_new`` — exactly the columns the industry-membership adapter
-aliases).  Membership validity decoding happens in the adapters.
+遍历 28 个申万一级行业指数，按每个行业调用厂商 ``index_member`` 接口，将原始成分行写入
+``{root}/sw_industry.parquet``（``index_code``/``con_code``/``in_date``/``out_date``/``is_new``——
+正是行业成分适配器所别名的列）。成分有效期的解码发生在适配层。
 """
 
 from __future__ import annotations
@@ -37,7 +35,7 @@ def fetch_sw_industry(
     sleep: float = 0.3,
     **options: Any,
 ) -> pd.DataFrame:
-    """Fetch SW L1 membership rows for every industry code (start/end unused)."""
+    """按每个行业代码拉取申万一级行业成分行（start/end 不使用）。"""
     sw_codes = options.get("sw_codes") or DEFAULT_SW_CODES
 
     all_dfs: list[pd.DataFrame] = []

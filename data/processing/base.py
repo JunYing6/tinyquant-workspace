@@ -1,4 +1,4 @@
-"""Derived-adapter helpers (second-stage processing over canonical data)."""
+"""衍生适配器辅助函数（基于标准数据的第二阶段处理）。"""
 
 from __future__ import annotations
 
@@ -7,13 +7,13 @@ from typing import Any
 
 
 def parameter_hash(*parts: Any) -> str:
-    """Stable hash over the indicator name and its parameters."""
+    """指标名及其参数的稳定哈希。"""
     digest = hashlib.md5("|".join(str(p) for p in parts).encode())
     return digest.hexdigest()[:16]
 
 
 def calculation_version(module: str, version: str) -> str:
-    """Provenance string binding a calculation implementation to a version."""
+    """将计算实现与版本绑定在一起的溯源字符串。"""
     return f"{module}@{version}"
 
 

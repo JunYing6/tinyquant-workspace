@@ -1,11 +1,9 @@
-"""Market-level margin summary fetcher (legacy scope ``idx=daily_margin``).
+"""市场级融资融券汇总获取器（旧作用域 ``idx=daily_margin``）。
 
-Calls the vendor ``margin`` interface per month and aggregates the raw rows to
-one summary row per trading day (sums of ``rzmre``/``rzye``/``rqye``/
-``rzrqye``), landing them at ``{year}/margin.parquet`` with
-``level='summary'``.  The per-stock ``level='detail'`` rows of the same file
-are written by the ``trade_data/margin_detail`` scope; the ``market.margin``
-adapter filters on ``level``.  Amounts stay in vendor yuan.
+按月调用厂商 ``margin`` 接口，将原始行聚合成每个交易日的汇总行（``rzmre``/``rzye``/``rqye``/
+``rzrqye`` 的求和），写入 ``{year}/margin.parquet``，带 ``level='summary'``。同一文件中按个股的
+``level='detail'`` 行由 ``trade_data/margin_detail`` 作用域写入；``market.margin`` 适配器按
+``level`` 过滤。金额保持厂商的元单位。
 """
 
 from __future__ import annotations
@@ -29,7 +27,7 @@ def fetch_margin(
     sleep: float = 0.0,
     **options: Any,
 ) -> pd.DataFrame:
-    """Fetch exchange-level margin balances and reduce to daily summary rows."""
+    """拉取交易所级融资融券余额，并降维为每日汇总行。"""
     max_retries = options.get("max_retries", 3)
     rows: list[dict[str, Any]] = []
 

@@ -1,9 +1,8 @@
-"""Share-pledge statistics fetcher (legacy scope ``event/pledge_stat``).
+"""股权质押统计获取器（旧作用域 ``event/pledge_stat``）。
 
-Calls the vendor ``pledge_stat`` interface once per trading day, stamps the
-query date into ``trade_date`` (the interface reports the quarter ``end_date``
-but not its snapshot date) and lands the rows at
-``{year}/pledge_stat.parquet`` (deduplicated on ``ts_code``+``trade_date``).
+按每个交易日调用厂商 ``pledge_stat`` 接口，把查询日期写入 ``trade_date``（该接口返回季度
+``end_date`` 但不含其快照日期），将行写入 ``{year}/pledge_stat.parquet``
+（按 ``ts_code``+``trade_date`` 去重）。
 """
 
 from __future__ import annotations
@@ -28,7 +27,7 @@ def fetch_pledge_stat(
     calendar: Callable[[str, str], list[str]] | None = None,
     **options: Any,
 ) -> pd.DataFrame:
-    """Fetch pledge statistics snapshots for every trading day in the range."""
+    """按区间内的每个交易日拉取质押统计快照。"""
     if calendar is None:
         raise ValueError("event/pledge_stat needs a calendar provider (injected or vendor)")
     max_retries = options.get("max_retries", 3)
