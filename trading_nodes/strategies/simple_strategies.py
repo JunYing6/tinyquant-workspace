@@ -13,24 +13,17 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from trading_nodes.methods.selector.fixed import FixedStockPicking
+from trading_nodes.methods.selector.selection import MomentumSelector, PriceFilterSelector
+from trading_nodes.methods.timer.kline import (
+    BreakoutTiming,
+    DualMaTiming,
+    GoldenCrossTiming,
+    MeanReversionTiming,
+)
 from trading_nodes.methods.timer.passive import NoTradeTiming
 from trading_nodes.methods.risk.full_position import FullPositionRisk
 from trading_nodes.methods.risk.atr import AtrRiskControl
-from trading_nodes.methods.selector.selection import MomentumSelector, PriceFilterSelector
-from trading_nodes.factors.timer.tick.intent_executor import IntentExecutorFactor
-from trading_nodes.factors.timer.kline.simple_timing import (
-    BreakoutTimingFactor,
-    DualMaTimingFactor,
-    GoldenCrossTimingFactor,
-    MeanReversionTimingFactor,
-)
-from trading_nodes_base.methods import BaseTimeSelection
 from trading_nodes_base.strategies import BaseStrategy
-
-
-def _timing(name: str, factors: list) -> BaseTimeSelection:
-    """组装一个择时器：K 线因子 + 统一的信号执行因子。"""
-    return BaseTimeSelection(name, factors, [IntentExecutorFactor()])
 
 
 class DualMaStrategy(BaseStrategy):
@@ -40,7 +33,7 @@ class DualMaStrategy(BaseStrategy):
 
     def __init__(self, stock_pool: Sequence[str] | None = None) -> None:
         selector = FixedStockPicking(["000001.SZ", "600000.SH"] if stock_pool is None else stock_pool)
-        super().__init__("dual-ma", selector, _timing("dual-ma-timing", [DualMaTimingFactor()]), FullPositionRisk())
+        super().__init__("dual-ma", selector, DualMaTiming(), FullPositionRisk())
 
 
 class BreakoutStrategy(BaseStrategy):
@@ -50,7 +43,7 @@ class BreakoutStrategy(BaseStrategy):
 
     def __init__(self, stock_pool: Sequence[str] | None = None) -> None:
         selector = FixedStockPicking(["000001.SZ", "600000.SH"] if stock_pool is None else stock_pool)
-        super().__init__("breakout", selector, _timing("breakout-timing", [BreakoutTimingFactor()]), FullPositionRisk())
+        super().__init__("breakout", selector, BreakoutTiming(), FullPositionRisk())
 
 
 class MeanReversionStrategy(BaseStrategy):
@@ -60,7 +53,7 @@ class MeanReversionStrategy(BaseStrategy):
 
     def __init__(self, stock_pool: Sequence[str] | None = None) -> None:
         selector = FixedStockPicking(["000001.SZ", "600000.SH"] if stock_pool is None else stock_pool)
-        super().__init__("mean-reversion", selector, _timing("mean-reversion-timing", [MeanReversionTimingFactor()]), FullPositionRisk())
+        super().__init__("mean-reversion", selector, MeanReversionTiming(), FullPositionRisk())
 
 
 class GoldenCrossStrategy(BaseStrategy):
@@ -70,7 +63,7 @@ class GoldenCrossStrategy(BaseStrategy):
 
     def __init__(self, stock_pool: Sequence[str] | None = None) -> None:
         selector = FixedStockPicking(["000001.SZ", "600000.SH"] if stock_pool is None else stock_pool)
-        super().__init__("golden-cross", selector, _timing("golden-cross-timing", [GoldenCrossTimingFactor()]), FullPositionRisk())
+        super().__init__("golden-cross", selector, GoldenCrossTiming(), FullPositionRisk())
 
 
 class AtrStopStrategy(BaseStrategy):
@@ -80,7 +73,7 @@ class AtrStopStrategy(BaseStrategy):
 
     def __init__(self, stock_pool: Sequence[str] | None = None) -> None:
         selector = FixedStockPicking(["000001.SZ", "600000.SH"] if stock_pool is None else stock_pool)
-        super().__init__("atr-stop", selector, _timing("atr-stop-timing", [DualMaTimingFactor()]), AtrRiskControl())
+        super().__init__("atr-stop", selector, DualMaTiming(), AtrRiskControl())
 
 
 class BreakoutRiskStrategy(BaseStrategy):
@@ -90,7 +83,7 @@ class BreakoutRiskStrategy(BaseStrategy):
 
     def __init__(self, stock_pool: Sequence[str] | None = None) -> None:
         selector = FixedStockPicking(["000001.SZ", "600000.SH"] if stock_pool is None else stock_pool)
-        super().__init__("breakout-risk", selector, _timing("breakout-risk-timing", [BreakoutTimingFactor()]), AtrRiskControl())
+        super().__init__("breakout-risk", selector, BreakoutTiming(), AtrRiskControl())
 
 
 class MomentumPickStrategy(BaseStrategy):
