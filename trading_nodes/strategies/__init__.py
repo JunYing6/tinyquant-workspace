@@ -1,4 +1,4 @@
-from .buy_close import BuyCloseStrategy
+from .magic_formula import MagicFormulaStrategy
 from .simple_strategies import (
     AtrStopStrategy,
     BreakoutRiskStrategy,
@@ -12,7 +12,7 @@ from .simple_strategies import (
 )
 
 __all__ = [
-    "BuyCloseStrategy",
+    "MagicFormulaStrategy",
     "AtrStopStrategy",
     "BreakoutRiskStrategy",
     "BreakoutStrategy",

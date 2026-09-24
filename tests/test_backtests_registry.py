@@ -9,7 +9,7 @@ from trading_nodes_base.streams import BaseStream
 
 def test_backtests_include_all_expected_items() -> None:
     names = {entry["name"] for entry in BACKTESTS}
-    assert "买入持有(buy-close)" in names
+    assert "神奇公式(magic-formula)" in names
     assert "双均线(dual-ma)" in names
     assert "九策略组合(multi-strategy)" in names
     assert any(entry["kind"] == "stream" for entry in BACKTESTS)

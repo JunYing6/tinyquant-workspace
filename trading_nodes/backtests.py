@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from config import settings
 from data.adapters import build_gateway
-from trading_nodes.strategies.buy_close import BuyCloseStrategy
+from trading_nodes.strategies.magic_formula import MagicFormulaStrategy
 from trading_nodes.strategies.simple_strategies import (
     AtrStopStrategy,
     BreakoutRiskStrategy,
@@ -17,8 +17,8 @@ from trading_nodes.strategies.simple_strategies import (
 from trading_nodes.streams.multi_strategy import MultiStrategyStream
 
 
-def build_buy_close():
-    return BuyCloseStrategy(list(settings.STOCK_POOL)), build_gateway()
+def build_magic_formula():
+    return MagicFormulaStrategy(list(settings.STOCK_POOL), top_n=5), build_gateway()
 
 
 def build_dual_ma():
@@ -62,7 +62,7 @@ def build_stream():
 
 
 BACKTESTS = [
-    {"name": "买入持有(buy-close)", "kind": "strategy", "factory": "trading_nodes.backtests:build_buy_close"},
+    {"name": "神奇公式(magic-formula)", "kind": "strategy", "factory": "trading_nodes.backtests:build_magic_formula"},
     {"name": "双均线(dual-ma)", "kind": "strategy", "factory": "trading_nodes.backtests:build_dual_ma"},
     {"name": "突破(breakout)", "kind": "strategy", "factory": "trading_nodes.backtests:build_breakout"},
     {"name": "均值回归(mean-reversion)", "kind": "strategy", "factory": "trading_nodes.backtests:build_mean_reversion"},

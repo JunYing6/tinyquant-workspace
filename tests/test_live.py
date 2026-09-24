@@ -8,7 +8,7 @@ from trading_nodes.live import (
     build_quote_client,
 )
 from tools.data import InMemoryGateway
-from trading_nodes.strategies.buy_close import BuyCloseStrategy
+from trading_nodes.strategies.simple_strategies import DualMaStrategy
 
 
 def test_paper_executor_buy_and_sell_updates_account() -> None:
@@ -39,7 +39,7 @@ def test_build_quote_client_mock() -> None:
 def test_build_live_returns_engine() -> None:
     from engines.realtime import RealTimeTradeEngine
 
-    strategy = BuyCloseStrategy()
+    strategy = DualMaStrategy()
     gateway = InMemoryGateway(bars=[], sessions=[])
     engine = build_live(strategy, gateway, route="paper", initial_capital=100000)
 

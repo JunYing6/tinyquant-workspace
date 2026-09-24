@@ -3,7 +3,7 @@
 Run ``python main.py`` with no arguments to start the ``tq`` CLI workbench
 (interactive REPL); any arguments are forwarded to the CLI.  If the CLI
 (``tinyquant`` installed with the ``[cli]`` extra) is not available,
-``main.py`` falls back to running the buy-close backtest directly.
+``main.py`` falls back to running the dual-ma backtest directly.
 
 Backtest factories and the registry live in ``trading_nodes/backtests.py``;
 the data gateway is assembled from ``config/settings.DATA_GATEWAY_FACTORY``.
@@ -19,9 +19,9 @@ from tools.excel_report import export_backtest_excel
 
 
 def _run_backtest(write_excel: bool, excel_dir: str | None = None) -> int:
-    from trading_nodes.backtests import build_buy_close
+    from trading_nodes.backtests import build_dual_ma
 
-    strategy, gateway = build_buy_close()
+    strategy, gateway = build_dual_ma()
     engine = FastBacktestEngine(
         strategy,
         settings.BACKTEST_START,
