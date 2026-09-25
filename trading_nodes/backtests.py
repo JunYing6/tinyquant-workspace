@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from config import settings
 from data.adapters import build_gateway
+from trading_nodes.strategies.kdj_volume_strategy import KdjVolumeStrategy
 from trading_nodes.strategies.magic_formula import MagicFormulaStrategy
 from trading_nodes.strategies.simple_strategies import (
     AtrStopStrategy,
@@ -15,10 +16,14 @@ from trading_nodes.strategies.simple_strategies import (
     MomentumPickStrategy,
 )
 from trading_nodes.streams.multi_strategy import MultiStrategyStream
-
+from trading_nodes.strategies.example import ExampleStrategy
 
 def build_magic_formula():
     return MagicFormulaStrategy(list(settings.STOCK_POOL), top_n=5), build_gateway()
+
+
+def build_kdj_volume():
+    return KdjVolumeStrategy(list(settings.STOCK_POOL)), build_gateway()
 
 
 def build_dual_ma():
@@ -63,6 +68,7 @@ def build_stream():
 
 BACKTESTS = [
     {"name": "神奇公式(magic-formula)", "kind": "strategy", "factory": "trading_nodes.backtests:build_magic_formula"},
+    {"name": "KDJ放量(kdj-volume)", "kind": "strategy", "factory": "trading_nodes.backtests:build_kdj_volume"},
     {"name": "双均线(dual-ma)", "kind": "strategy", "factory": "trading_nodes.backtests:build_dual_ma"},
     {"name": "突破(breakout)", "kind": "strategy", "factory": "trading_nodes.backtests:build_breakout"},
     {"name": "均值回归(mean-reversion)", "kind": "strategy", "factory": "trading_nodes.backtests:build_mean_reversion"},

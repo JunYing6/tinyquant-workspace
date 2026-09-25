@@ -1,3 +1,4 @@
+from .kdj_volume_strategy import KdjVolumeStrategy
 from .magic_formula import MagicFormulaStrategy
 from .simple_strategies import (
     AtrStopStrategy,
@@ -12,6 +13,7 @@ from .simple_strategies import (
 )
 
 __all__ = [
+    "KdjVolumeStrategy",
     "MagicFormulaStrategy",
     "AtrStopStrategy",
     "BreakoutRiskStrategy",
