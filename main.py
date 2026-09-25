@@ -17,6 +17,18 @@ from engines.fast import FastBacktestEngine
 from tools.excel_report import export_backtest_excel
 
 
+def build_gateway():
+    from data.adapters import build_gateway as _build_gateway
+
+    return _build_gateway()
+
+
+def build_backtest():
+    from trading_nodes.backtests import build_dual_ma
+
+    return build_dual_ma()
+
+
 def _run_backtest(write_excel: bool, excel_dir: str | None = None) -> int:
     from trading_nodes.backtests import build_dual_ma
 
