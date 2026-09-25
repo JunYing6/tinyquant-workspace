@@ -61,13 +61,19 @@ class EarningsYieldFactor(FloatSelectionFactor):
     def get_query_lst(self, date: Any, codes: Optional[list[str]] = None) -> list[dict]:
         self._data_clear()
         universe = codes or self.universe
-        # 声明式数据需求：财务报表字段 + 总市值
+        # 声明式数据需求：利润表 + 资产负债表字段 + 总市值
         return [
             {
-                "type": "fina/report",
+                "dataset": "fundamental.income",
                 "date": date,
                 "codes": universe,
-                "fields": ["operate_profit", "fin_exp", "st_borr", "lt_borr", "money_cap"],
+                "fields": ["operate_profit", "fin_exp"],
+            },
+            {
+                "dataset": "fundamental.balance",
+                "date": date,
+                "codes": universe,
+                "fields": ["st_borr", "lt_borr", "money_cap"],
             },
             {
                 "dataset": "market.daily_metric",
@@ -119,7 +125,7 @@ class ReturnOnCapitalFactor(FloatSelectionFactor):
         # 声明式数据需求：roic 财务指标
         return [
             {
-                "type": "fina/report",
+                "dataset": "fundamental.indicator",
                 "date": date,
                 "codes": codes or self.universe,
                 "fields": ["roic"],
