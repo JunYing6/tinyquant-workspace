@@ -16,7 +16,6 @@ from trading_nodes.strategies.simple_strategies import (
     MomentumPickStrategy,
 )
 from trading_nodes.streams.multi_strategy import MultiStrategyStream
-from trading_nodes.strategies.example import ExampleStrategy
 
 def build_magic_formula():
     return MagicFormulaStrategy(list(settings.STOCK_POOL), top_n=5), build_gateway()
