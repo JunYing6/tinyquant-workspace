@@ -248,11 +248,25 @@ class WorkspaceBarAdapter:
         dropped = 0
         start_s = to_yyyymmdd(start_d) if start_d is not None else None
         end_s = to_yyyymmdd(end_d) if end_d is not None else None
+        freq = request.frequency or "1d"
         for db_path in files:
-            frame = read_table(db_path, "kline").rename(columns=_BAR_ALIASES)
+            # 下推 instruments/日期/周期到 DuckDB，避免全表读入（Python 侧保留同样过滤作一致性保障）
+            conditions = ["timeframe = ?"]
+            params: list = [freq]
+            if request.instruments is not None and len(request.instruments) > 0:
+                placeholders = ", ".join("?" for _ in request.instruments)
+                conditions.append(f"ts_code IN ({placeholders})")
+                params.extend(request.instruments)
+            if start_s is not None:
+                conditions.append("trade_date >= ?")
+                params.append(start_s)
+            if end_s is not None:
+                conditions.append("trade_date <= ?")
+                params.append(end_s)
+            frame = read_table(db_path, "kline", where=" AND ".join(conditions), params=params).rename(columns=_BAR_ALIASES)
             # 打包的 kline 表包含多日周期（5d/10d）；
             # 除非另行指定，本适配器仅提供日线 bar 视图
-            frame = frame[frame["timeframe"] == (request.frequency or "1d")]
+            frame = frame[frame["timeframe"] == freq]
             if wanted_asset is not None:
                 frame = frame[frame["data_type"].map(ASSET_TYPE_MAP) == wanted_asset]
             if request.instruments is not None:
