@@ -24,9 +24,10 @@ class _DailyTimingFactor(KlineTimingFactor):
         self._data_clear()
         return []
 
-    def _intent(self, bar: KlineBar, action: str, reason: str) -> SignalIntent:
-        # 统一构造一个买入/卖出信号意图（每次交易量固定为 100 手）。
-        return SignalIntent(bar.code, action, bar.end_time, reason, {"volume": 100})
+    def _intent(self, bar: KlineBar, action: str, reason: str, sizing: float = 1.0) -> SignalIntent:
+        # 统一构造买入/卖出信号意图：按资金比例下单（默认满仓买入/清仓卖出），
+        # 实际手数由策略按账户权益换算，不再固定 100 股。
+        return SignalIntent(bar.code, action, bar.end_time, reason, {"sizing_intent": sizing})
 
 
 class DualMaTimingFactor(_DailyTimingFactor):
