@@ -21,7 +21,6 @@ from trading_nodes_base.factors import KlineTimingFactor
 from trading_nodes_base.methods import BaseTimeSelection
 from trading_nodes_base.strategies import BaseStrategy
 from trading_nodes_base.types import SignalIntent
-from trading_nodes.factors.timer.tick.intent_executor import IntentExecutorFactor
 from trading_nodes.methods.risk.full_position import FullPositionRisk
 from trading_nodes.methods.selector.fixed import FixedStockPicking
 
@@ -109,7 +108,7 @@ class KdjVolumeTimingFactor(KlineTimingFactor):
         if float(bar.close) < ma_exit:
             intents.append(SignalIntent(
                 code, "SELL", getattr(bar, "end_time", None),
-                "kdj-volume-sell", {"sizing_intent": 1.0},
+                "kdj-volume-sell", {},
             ))
         return intents
 
@@ -118,6 +117,10 @@ class KdjVolumeStrategy(BaseStrategy):
     """KDJ cross + volume + MA-breakout buy, 20-day MA exit."""
 
     supports_fast_backtest = True
+    tick_mode = False
+    execution_timing = "close"
+    fast_buy_timing = "open"
+    fast_sell_timing = "open"
 
     def __init__(self, stock_pool: Optional[Sequence[str]] = None) -> None:
         pool = list(stock_pool or ["000001.SZ", "600000.SH"])
@@ -125,7 +128,7 @@ class KdjVolumeStrategy(BaseStrategy):
         timer = BaseTimeSelection(
             "kdj-volume-timer",
             kline_factors=[KdjVolumeTimingFactor(pool)],
-            tick_factors=[IntentExecutorFactor()],
+            tick_factors=[],
         )
         super().__init__(
             strategy_name="kdj-volume",

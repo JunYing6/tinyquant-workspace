@@ -33,7 +33,6 @@ from trading_nodes_base.factors import FloatSelectionFactor, KlineTimingFactor
 from trading_nodes_base.methods import BaseStockPicking, BaseTimeSelection
 from trading_nodes_base.strategies import BaseStrategy
 from trading_nodes_base.types import SignalIntent
-from trading_nodes.factors.timer.tick.intent_executor import IntentExecutorFactor
 from trading_nodes.methods.risk.full_position import FullPositionRisk
 
 
@@ -229,16 +228,15 @@ class MagicFormulaRebalanceFactor(KlineTimingFactor):
         held = set(self.timer.position_pool) if self.timer else set()    # 当前持仓名单
         intents: List[SignalIntent] = []
         if code in target and code not in held:
-            # 新入选 -> 买入
-            size = 1.0 / len(target) if target else 1.0
+            # 新入选 -> 买入（裸信号，仓位由择时器按池等权计算）
             intents.append(SignalIntent(
-                code, "BUY", end_time, "magic-formula-buy", {"sizing_intent": size}
+                code, "BUY", end_time, "magic-formula-buy", {}
             ))
             self._emitted.add(code)
         elif code in held and code not in target:
-            # 被剔除 -> 卖出
+            # 被剔除 -> 卖出（裸信号，择时器全出）
             intents.append(SignalIntent(
-                code, "SELL", end_time, "magic-formula-sell", {"sizing_intent": 1.0}
+                code, "SELL", end_time, "magic-formula-sell", {}
             ))
             self._emitted.add(code)
         return intents
@@ -248,6 +246,10 @@ class MagicFormulaStrategy(BaseStrategy):
     """持有神奇公式选出的标的，半年度再平衡。"""
 
     supports_fast_backtest = True
+    tick_mode = False
+    execution_timing = "close"
+    fast_buy_timing = "open"
+    fast_sell_timing = "open"
 
     def __init__(
         self,
@@ -262,7 +264,7 @@ class MagicFormulaStrategy(BaseStrategy):
         timer = BaseTimeSelection(
             "magic-formula-timer",
             kline_factors=[rebalance],
-            tick_factors=[IntentExecutorFactor()],
+            tick_factors=[],
         )
         rebalance.timer = timer
         super().__init__(

@@ -7,7 +7,6 @@ PriceAboveMaSelectionFactor = import_module("trading_nodes.factors.selector.and.
 MomentumSelectionFactor = import_module("trading_nodes.factors.selector.float.momentum").MomentumSelectionFactor
 AtrStopRiskFactor = import_module("trading_nodes.factors.risk.kline.atr_stop").AtrStopRiskFactor
 from trading_nodes.factors.timer.kline.simple_timing import DualMaTimingFactor
-from trading_nodes.factors.timer.tick.intent_executor import IntentExecutorFactor
 from trading_nodes.methods.selector.fixed import FixedStockPicking
 from trading_nodes.minds.weighting import KellyPositionMind, MarketRegimeMind
 from trading_nodes.strategies.simple_strategies import EmptyPositionStrategy
@@ -35,7 +34,6 @@ def test_canonical_nodes_import_and_construct() -> None:
     assert PriceAboveMaSelectionFactor.factor_kind == "selection_binary"
     assert MomentumSelectionFactor.factor_kind == "selection_float"
     assert DualMaTimingFactor.factor_kind == "timing_kline"
-    assert IntentExecutorFactor.factor_kind == "timing_tick"
     assert AtrStopRiskFactor.factor_kind == "risk_kline"
     assert isinstance(FixedStockPicking(), FixedStockPicking)
     assert isinstance(EmptyPositionStrategy().selector, FixedStockPicking)
