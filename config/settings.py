@@ -14,7 +14,7 @@ except ImportError:
     secrets = None
 
 BACKTEST_START = "20240102"
-BACKTEST_END = "20240103"
+BACKTEST_END = "20240329"
 INITIAL_CAPITAL = 1_000_000.0
 STOCK_POOL = ["000001.SZ", "600000.SH"]
 QUOTE_TOKEN = getattr(secrets, "QUOTE_TOKEN", "") if secrets else ""
