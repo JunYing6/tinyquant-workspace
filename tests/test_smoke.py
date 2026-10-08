@@ -1,8 +1,8 @@
-"""面向用户侧工程的冒烟测试：适配器、策略与网关。"""
+"""Smoke tests for the user-side project: adapters, strategy and gateway."""
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -19,8 +19,8 @@ REAL_VOLUME = Path("E:/ProgramData")
     reason="workspace volume not mounted",
 )
 def test_gateway_assembles_and_runs_backtest() -> None:
-    """真实网关冒烟路径：基于 USB 卷调用 main.build_gateway。"""
-    from main import build_gateway
+    """The real-gateway smoke path: data.adapters.build_gateway over the USB volume."""
+    from data.adapters import build_gateway
 
     gateway = build_gateway()
     strategy = DualMaStrategy(["000001.SZ", "600000.SH"])
@@ -89,6 +89,7 @@ def test_selection_factors_accept_gateway_bar_records() -> None:
 
     price_factor = PriceAboveMaSelectionFactor(window=1)
     price_factor._begin_request_generation()
+    price_factor.sign["fit"] = True
     price_factor._register_request("data")
     price_factor.receive_data({"request_id": "data"}, batch.records)
     price_factor.sign["data"] = True
@@ -96,6 +97,7 @@ def test_selection_factors_accept_gateway_bar_records() -> None:
 
     momentum_factor = MomentumSelectionFactor(window=1)
     momentum_factor._begin_request_generation()
+    momentum_factor.sign["fit"] = True
     momentum_factor._register_request("data")
     momentum_factor.receive_data({"request_id": "data"}, batch.records)
     momentum_factor.sign["data"] = True
