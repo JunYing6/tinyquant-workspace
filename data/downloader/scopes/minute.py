@@ -1,8 +1,9 @@
 """分钟线（stk_mins）获取器（旧作用域 ``trade_data/minute``）。
 
-按每个标的代码调用厂商 ``stk_mins`` 接口，将原始行写入 ``{year}/year.duckdb`` 表的
-``minute_{freq}``（如 ``minute_30min``，按 ``ts_code``+``trade_time`` 去重）。发布目录中该布局
-没有 MigrationMapping 模板，因此本作用域注册自定义写入器而非映射驱动的写入器。厂商字段保持原样。
+按每个标的代码调用厂商 ``stk_mins`` 接口，将原始行写入 per-day
+``{year}/{MMDD}/kline.parquet``（统一 kline schema，``timeframe`` 列标记频率，
+如 ``30m``；按 ``ts_code``+``trade_date``+``trade_time``+``data_type``+``timeframe`` 去重）。
+厂商字段保持原样。
 """
 
 from __future__ import annotations

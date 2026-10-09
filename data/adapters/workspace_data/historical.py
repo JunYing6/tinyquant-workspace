@@ -2,8 +2,10 @@
 
 ``WorkspaceParquetAdapter`` 提供一期表/bar 数据集：
 
-- ``market.bar`` / ``index.bar`` / ``fund.bar``（按年 ``year.duckdb#kline``，
+- ``market.bar`` / ``index.bar`` / ``fund.bar``（日线及以上：按年 ``year.duckdb#kline``，
   由 ``data_type`` 列分派；1d 与多日周期）
+- 日内频率（如 ``30m``）：从 per-day ``{MMDD}/kline.parquet`` 读取（统一 kline schema，
+  按 ``timeframe`` 列过滤）
 - ``market.daily_metric``（``year.duckdb#daily_basic``）
 - ``instrument.master``（``reference.duckdb#stock_basic``）
 - ``industry.membership``（``reference.duckdb#sw_industry``）

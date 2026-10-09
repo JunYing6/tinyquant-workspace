@@ -1,8 +1,9 @@
 """Kline 打包：按日 bar 文件 -> 年度 ``kline`` duckdb 表。
 
 日线类 scope（``trade_data/daily``、``index/daily``、``fund/daily``）
-将每个交易日的厂商行落到 ``{year}/{MMDD}/kline.parquet``——即原始层。
-本模块将这些文件打包进 ``{year}/year.duckdb`` 的 ``kline`` 表
+将每个交易日的厂商行落到 ``{year}/{MMDD}/kline.parquet``——即原始层
+（该文件为统一 kline schema，``timeframe`` 列区分日线与日内分钟；打包只取日线行）。
+本模块将这些日线行打包进 ``{year}/year.duckdb`` 的 ``kline`` 表
 （``market.bar`` 适配器读取的布局），并从 1d 行派生出多日周期（5d/10d）：
 
 - 对每个标的（``data_type`` + ``ts_code``），将当年按 ``trade_date``

@@ -3,15 +3,20 @@
 将整合前 ``E:/ProgramData`` 布局
 
     {root}/*.parquet                     全局表
-    {root}/{year}/*.parquet              年度表（含 kline.parquet）
+    {root}/{year}/*.parquet              年度表（含 kline.parquet、minute_*.parquet）
     {root}/{year}/{MMDD}/index_member.parquet  按日成分文件
 
 转换为整合后布局
 
     {root}/reference.duckdb              全局表
-    {root}/{year}/year.duckdb            年度表（kline + 已打包的 5d/10d）
-    {root}/{year}/{MMDD}/kline.parquet   按日 bar 文件（原始层）
+    {root}/{year}/year.duckdb            年度表（kline：日线 1d + 派生 5d/10d）
+    {root}/{year}/{MMDD}/kline.parquet   按日 bar 文件（原始层；统一 kline schema，
+                                          用 timeframe 列区分 1d 与日内分钟，如 30m）
     {root}/{year}/{MMDD}/stock|tradable|index.parquet  未触碰的分笔卷
+
+分钟布局（方案乙）：分钟线统一落入 per-day ``{MMDD}/kline.parquet`` 的 ``timeframe`` 列；
+年度库只保留日线及以上。历史 ``year.duckdb#minute_*`` 老表用 ``--minute`` 迁到 per-day，
+再用 ``--fix-data-type`` 按 ``year#kline`` 的 code->类型校正指数/基金标签。
 
 安全模型：每次转换先把数据写入目标 duckdb，然后将源数据帧与所写表
 相互校验（行数、列集合、内容摘要）；只有当该批次所有表都通过校验后
@@ -20,8 +25,10 @@
 
 用法::
 
-    python -m data.downloader.migrate E:/ProgramData            # 试运行
-    python -m data.downloader.migrate E:/ProgramData --apply    # 转换 + 删除
+    python -m data.downloader.migrate E:/ProgramData                       # 试运行
+    python -m data.downloader.migrate E:/ProgramData --apply               # 转换 + 删除
+    python -m data.downloader.migrate E:/ProgramData --minute [--apply]        # 迁移分钟老表
+    python -m data.downloader.migrate E:/ProgramData --fix-data-type [--apply] # 校正分钟 data_type
 """
 
 from __future__ import annotations
@@ -177,13 +184,13 @@ def migrate_year(root: Path, year: str, report: MigrationReport) -> None:
             raise SystemExit(f"validation failed for {source_path}; aborting before delete")
         report.deleted.append(str(source_path))
 
+    # 分钟线：旧 ``{year}/minute_*.parquet`` -> per-day ``{MMDD}/kline.parquet``（方案乙）
     for minute_file in sorted(year_dir.glob("minute_*.parquet")):
-        table = minute_file.stem
         frame = pd.read_parquet(minute_file)
-        merge_duckdb_table(db_path, table, frame)
-        report.converted.append(str(minute_file))
-        if not _validate(db_path, table, frame, report, f"{year}.{table}"):
-            raise SystemExit(f"validation failed for {minute_file}; aborting before delete")
+        freq = minute_file.stem.split("minute_", 1)[1] or "30min"
+        written = minute_scope.write_minute(RawVolumeWriter(root), frame, freq=freq)
+        report.converted.append(f"{minute_file} -> {len(written)} day file(s)")
+        report.validated.append(str(minute_file))
         report.deleted.append(str(minute_file))
 
     # 按日 index_member 文件 -> 一张年度表

@@ -13,8 +13,9 @@
   （``kline`` 含多日周期、``daily_basic``、``margin`` 等）；
 - ``{root}/{year}/{MMDD}/stock|tradable|index.parquet``  每日 tick 成交量
   （一次写入，厂商原生格式）；
-- ``{root}/{year}/{MMDD}/kline.parquet``  当日厂商日线 bar 行——年度
-  ``kline`` 表据此打包的原始层。
+- ``{root}/{year}/{MMDD}/kline.parquet``  当日 bar 行——统一 kline schema，用
+  ``timeframe`` 列区分日线（``1d``）与日内分钟（如 ``30m``）；年度 ``kline``
+  表的日线据此打包（原始层）。
 
 模板的表采用 ``#`` 后缀命名（``{year}/year.duckdb#kline``）。
 ``physical_sources`` 是读取方查找数据的位置；``write_targets``（若设置）
