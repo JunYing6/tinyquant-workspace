@@ -52,13 +52,17 @@ def pack_kline(
     db_path = year_dir / "year.duckdb"
 
     day_files = sorted(year_dir.glob("*/kline.parquet"))
-    file_rows = (
-        pd.concat((pd.read_parquet(p) for p in day_files), ignore_index=True)
-        if day_files
-        else pd.DataFrame()
-    )
-    if not file_rows.empty and "timeframe" in file_rows.columns:
-        file_rows = file_rows[file_rows["timeframe"] == KLINE_BASE_TIMEFRAME]
+    frames: list[pd.DataFrame] = []
+    for path in day_files:
+        try:
+            frame = pd.read_parquet(path, filters=[("timeframe", "==", KLINE_BASE_TIMEFRAME)])
+        except Exception:
+            frame = pd.read_parquet(path)
+            if "timeframe" in frame.columns:
+                frame = frame[frame["timeframe"] == KLINE_BASE_TIMEFRAME]
+        if not frame.empty:
+            frames.append(frame)
+    file_rows = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
     base_1d = _merge_base_1d(db_path, file_rows)
     if base_1d.empty:

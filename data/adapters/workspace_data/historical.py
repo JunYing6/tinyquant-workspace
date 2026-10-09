@@ -16,9 +16,11 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
+
+import pandas as pd
 
 from tools.data import (
     AdapterDescriptor,
@@ -43,6 +45,7 @@ from data.adapters.workspace_data.reader import (
     REFERENCE_DB,
     STATUS_MAP,
     announcement_close,
+    date_range_days,
     parse_yyyymmdd,
     read_table,
     resolve_year_dbs,
@@ -60,6 +63,14 @@ SOURCE = "workspace-parquet"
 _BAR_ALIASES = {"ts_code": "instrument_id", "trade_date": "trading_date", "vol": "volume", "amount": "turnover"}
 _BAR_CONVERSIONS = {"volume": 100.0, "turnover": 1000.0}  # 手 -> 股，千元 -> 元
 _INDEX_VOLUME_FACTOR = 1.0  # 指数量保留数据源原生单位（参见 mappings）
+
+
+def _intraday_delta(freq: str) -> timedelta:
+    unit = freq[-1]
+    count = int(freq[:-1] or 1)
+    return timedelta(minutes=count * (60 if unit == "h" else 1))
+
+
 _METRIC_CONVERSIONS = {
     "total_mv": 10000.0,
     "circ_mv": 10000.0,
@@ -172,7 +183,7 @@ class WorkspaceBarAdapter:
     def __init__(self, data_root: str | Path, market: str = MARKET) -> None:
         self._root = Path(data_root)
         self._market = market
-        frequencies = ("1d",)
+        frequencies = ("1d", "30m")
         self._open_days_cache: list[date] | None = None
         self.descriptor = AdapterDescriptor(
             name=ADAPTER_NAME,
@@ -239,6 +250,9 @@ class WorkspaceBarAdapter:
     def _read_bars(self, request: DataRequest) -> DataBatch:
         view = request.dataset
         wanted_asset = {"market.bar": None, "index.bar": "index", "fund.bar": "fund"}[view]
+        freq = request.frequency or "1d"
+        if freq and freq[-1] in ("m", "h"):
+            return self._read_intraday_bars(request, view, freq)
         start_d, end_d = self._resolve_range(request)
         files = resolve_year_dbs(self._root, start_d, end_d)
         revision = source_revision(files) if files else "wp-empty"
@@ -337,6 +351,67 @@ class WorkspaceBarAdapter:
                 ),
             )
         return _batch(ADAPTER_NAME, revision, request, view, tuple(records), warnings=warnings)
+
+    def _read_intraday_bars(self, request: DataRequest, view: str, freq: str) -> DataBatch:
+        """日内频率（如 30m）从 per-day ``{MMDD}/kline.parquet`` 读取（统一 kline 存储，timeframe 列）。"""
+        wanted_asset = {"market.bar": None, "index.bar": "index", "fund.bar": "fund"}[view]
+        step = _intraday_delta(freq)
+        records: list[Bar] = []
+        used_files: list[Path] = []
+        for day in date_range_days(request.start, request.end):
+            path = self._root / str(day.year) / day.strftime("%m%d") / "kline.parquet"
+            if not path.is_file():
+                continue
+            used_files.append(path)
+            try:
+                frame = pd.read_parquet(path, filters=[("timeframe", "==", freq)])
+            except Exception:
+                frame = pd.read_parquet(path)
+                if "timeframe" in frame.columns:
+                    frame = frame[frame["timeframe"] == freq]
+            if frame.empty:
+                continue
+            if request.instruments is not None:
+                frame = frame[frame["ts_code"].isin(request.instruments)]
+            if wanted_asset is not None:
+                frame = frame[frame["data_type"].map(ASSET_TYPE_MAP) == wanted_asset]
+            for row in frame.to_dict("records"):
+                ts = pd.to_datetime(row.get("trade_time"), errors="coerce")
+                if ts is None or ts is pd.NaT:
+                    continue
+                interval_end = ts.to_pydatetime().replace(tzinfo=CST)
+                prices = [row.get(c) for c in ("open", "high", "low", "close")]
+                if any(v is None or v != v for v in prices):
+                    continue
+                raw_volume = row.get("vol")
+                raw_turnover = row.get("amount")
+                records.append(Bar(
+                    schema_version=SCHEMA_VERSION,
+                    event_id=None,
+                    instrument_id=str(row["ts_code"]),
+                    asset_type=ASSET_TYPE_MAP.get(str(row.get("data_type")), "equity"),
+                    effective_time=interval_end,
+                    event_time=interval_end,
+                    available_at=interval_end,
+                    trading_date=day,
+                    source=SOURCE,
+                    quality="valid",
+                    metadata={},
+                    frequency=freq,
+                    interval_start=interval_end - step,
+                    interval_end=interval_end,
+                    open=float(row["open"]),
+                    high=float(row["high"]),
+                    low=float(row["low"]),
+                    close=float(row["close"]),
+                    volume=float(raw_volume) * _BAR_CONVERSIONS["volume"] if raw_volume == raw_volume else 0.0,
+                    turnover=float(raw_turnover) * _BAR_CONVERSIONS["turnover"] if raw_turnover == raw_turnover else 0.0,
+                    is_complete=True,
+                    price_basis="raw",
+                ))
+        records.sort(key=lambda bar: (bar.instrument_id, bar.interval_end))
+        revision = source_revision(used_files) if used_files else "wp-empty"
+        return _batch(ADAPTER_NAME, revision, request, view, tuple(records))
 
     # -- 每日估值指标 ---------------------------------------------------------
 
