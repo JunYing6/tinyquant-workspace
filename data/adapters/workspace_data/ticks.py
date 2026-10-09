@@ -88,7 +88,15 @@ class WorkspaceTickAdapter:
         raise ValueError(f"workspace-tick adapter does not serve {request.dataset!r}")
 
     def iter(self, request: DataRequest, chunk_size: int = 10_000):
-        yield self.read(request)
+        batch = self.read(request)
+        if not batch.records:
+            yield batch
+            return
+        # 逐 chunk 产出全局 (event_time, code, seq) 有序的事件流：源数据按标的成组，
+        # 流式消费方需要跨标的的时间单调顺序。
+        records = sorted(batch.records, key=lambda r: (r.event_time, r.instrument_id, getattr(r, "sequence", 0) or 0))
+        for index in range(0, len(records), chunk_size):
+            yield self._batch(request, records[index:index + chunk_size], [])
 
     def _day_file(self, day: date, asset_type: str) -> Path:
         sub = day.strftime("%m%d")
