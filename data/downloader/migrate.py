@@ -35,7 +35,7 @@ import pandas as pd
 import duckdb
 
 from data.downloader.base import merge_duckdb_table, read_duckdb_table, RawVolumeWriter
-from data.downloader.pack import KLINE_TABLE, pack_kline
+from data.downloader.pack import KLINE_BASE_TIMEFRAME, KLINE_TABLE, pack_kline
 from data.downloader.scopes import minute as minute_scope
 
 logger = logging.getLogger(__name__)
@@ -289,6 +289,39 @@ def migrate_minute_tables(root: str | Path, *, apply: bool = False) -> Migration
     return report
 
 
+def fix_intraday_data_type(root: str | Path, *, apply: bool = False) -> MigrationReport:
+    """用 ``year#kline`` 的 code->data_type（stock/index/fund）校正 per-day 分钟行的 ``data_type``。
+
+    分钟迁移时统一标了 ``stock``；本函数按年度的标的类型映射把 index/fund 分钟行改对。
+    默认 dry-run 只统计；``apply=True`` 才写回。
+    """
+    root = Path(root)
+    report = MigrationReport()
+    for year_dir in sorted(p for p in root.iterdir() if p.is_dir() and p.name.isdigit()):
+        db_path = year_dir / YEAR_DB
+        if not db_path.is_file():
+            continue
+        ref = read_duckdb_table(db_path, KLINE_TABLE, columns=["ts_code", "data_type"])
+        mapping = dict(zip(ref["ts_code"].astype(str), ref["data_type"].astype(str)))
+        for path in sorted(year_dir.glob("*/kline.parquet")):
+            frame = pd.read_parquet(path)
+            if "timeframe" not in frame.columns:
+                continue
+            mask = frame["timeframe"].ne(KLINE_BASE_TIMEFRAME) & frame["ts_code"].astype(str).isin(mapping)
+            if not mask.any():
+                continue
+            mapped = frame.loc[mask, "ts_code"].astype(str).map(mapping)
+            changed = int((mapped != frame.loc[mask, "data_type"].astype(str)).sum())
+            if changed:
+                if apply:
+                    frame.loc[mask, "data_type"] = mapped
+                    frame.to_parquet(path, index=False)
+                report.converted.append(f"{path.name} @ {year_dir.name}: {changed} rows -> {sorted(set(mapped))}")
+            if apply:
+                report.validated.append(str(path))
+    return report
+
+
 def migrate_volume(root: str | Path, *, apply: bool = False) -> MigrationReport:
     """转换整个旧版卷；仅当 ``apply`` 时才删除旧版文件。"""
     root = Path(root)
@@ -328,9 +361,15 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("root", help="数据卷根目录，如 E:/ProgramData")
     parser.add_argument("--apply", action="store_true", help="校验通过后删除旧 parquet（默认只转换+校验）")
     parser.add_argument("--minute", action="store_true", help="改为迁移 year.duckdb 的 minute_* 老表到 per-day kline.parquet")
+    parser.add_argument("--fix-data-type", action="store_true", help="校正 per-day 分钟行的 data_type（用 year#kline 的 code->类型）")
     args = parser.parse_args(argv)
 
-    report = migrate_minute_tables(args.root, apply=args.apply) if args.minute else migrate_volume(args.root, apply=args.apply)
+    if args.fix_data_type:
+        report = fix_intraday_data_type(args.root, apply=args.apply)
+    elif args.minute:
+        report = migrate_minute_tables(args.root, apply=args.apply)
+    else:
+        report = migrate_volume(args.root, apply=args.apply)
     print(f"\n转换 {len(report.converted)} 项, 校验通过 {len(report.validated)} 项, "
           f"待删/已删 {len(report.deleted)} 项, 跳过 {len(report.skipped)} 项")
     for line in report.converted:
