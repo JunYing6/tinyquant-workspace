@@ -82,4 +82,5 @@ def fetch_fund_daily(
     result = pd.concat(all_rows, ignore_index=True)
     result["data_type"] = "fund"
     result["timeframe"] = "1d"
+    result["trade_time"] = pd.NA
     return result

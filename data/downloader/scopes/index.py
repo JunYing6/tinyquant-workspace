@@ -67,4 +67,5 @@ def fetch_index_daily(
     result = pd.concat(all_rows, ignore_index=True)
     result["data_type"] = "index"
     result["timeframe"] = "1d"
+    result["trade_time"] = pd.NA
     return result

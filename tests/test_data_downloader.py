@@ -903,7 +903,7 @@ def test_daily_scope_writes_day_files_and_packed_tables(downloader, root):
     }
     day_frame = pl.read_parquet(root / "2024" / "0102" / "kline.parquet").to_pandas()
     assert list(day_frame.columns) == [
-        "ts_code", "trade_date", "open", "high", "low", "close", "pre_close",
+        "ts_code", "trade_date", "trade_time", "open", "high", "low", "close", "pre_close",
         "pct_chg", "vol", "amount", "adj_factor", "name", "data_type", "timeframe",
         "change",
     ]
@@ -997,15 +997,22 @@ def test_breadth_is_aggregated_from_the_day_files(downloader, root):
 
 
 def test_minute_scope_writes_freq_table(downloader, root):
+    import polars as pl
+
     paths = downloader.download(
         "trade_data/minute",
         START,
         END,
         options={"codes": [INSTRUMENT], "freq": "30min"},
     )
-    assert [p.relative_to(root) for p in paths] == [Path(YEAR_DB)]
-    frame = read_duckdb_table(root / YEAR_DB, "minute_30min")
-    assert {"ts_code", "trade_time"} <= set(frame.columns)
+    # 方案乙：分钟线统一落入按日 kline.parquet（用 timeframe 频率列区分）
+    assert paths
+    assert all(p.name == "kline.parquet" for p in paths)
+    assert all(p.parent.parent.name == "2024" for p in paths)
+    frame = pl.read_parquet(paths[0]).to_pandas()
+    assert {"ts_code", "trade_date", "trade_time", "data_type", "timeframe"} <= set(frame.columns)
+    assert set(frame["timeframe"]) == {"30m"}
+    assert frame["trade_time"].notna().all()
 
 
 def test_minute_scope_requires_codes(downloader):

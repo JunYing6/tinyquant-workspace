@@ -36,7 +36,7 @@ DAILY_BASIC_FIELDS = (
 )
 
 KLINE_COLUMNS = [
-    "ts_code", "trade_date", "open", "high", "low", "close", "pre_close",
+    "ts_code", "trade_date", "trade_time", "open", "high", "low", "close", "pre_close",
     "pct_chg", "vol", "amount", "adj_factor", "name", "data_type", "timeframe",
     "change",
 ]

@@ -14,7 +14,7 @@ from typing import Any
 
 import pandas as pd
 
-from data.downloader.base import RawVolumeWriter, merge_duckdb_table, retry_call
+from data.downloader.base import RawVolumeWriter, retry_call
 
 logger = logging.getLogger(__name__)
 
@@ -72,17 +72,47 @@ def write_minute(
     freq: str = "30min",
     **options: Any,
 ) -> list[Path]:
-    """自定义写入器：按 ``trade_time`` 写入 ``{root}/{year}/year.duckdb`` 表的 ``minute_{freq}``。"""
+    """写入器：分钟线统一落入按日 ``{root}/{year}/{MMDD}/kline.parquet``。
+
+    与日线共用一份 ``kline`` schema，用 ``timeframe`` 频率列区分（如 ``30m``）：
+    分钟行填 ``trade_date``（当日）+ ``trade_time``（完整时间）+ ``timeframe``；
+    其余日线专属列留空。按 ``ts_code``+``trade_date``+``trade_time``+``data_type``+``timeframe`` 去重合并。
+    """
     if frame.empty:
         return []
     if "trade_time" not in frame.columns:
         raise ValueError(f"minute rows need a trade_time column, got {list(frame.columns)}")
+
+    from data.downloader.scopes.daily import KLINE_COLUMNS
+
+    data_type = str(options.get("data_type", "stock"))
     frame = frame.copy()
-    frame["trade_time"] = frame["trade_time"].astype(str)
-    years = frame["trade_time"].str.replace("-", "", regex=False).str.slice(0, 4)
+    ts = pd.to_datetime(frame["trade_time"])
+    frame["trade_time"] = ts.dt.strftime("%Y-%m-%d %H:%M:%S")
+    frame["trade_date"] = ts.dt.strftime("%Y%m%d")
+    frame["data_type"] = data_type
+    frame["timeframe"] = _freq_label(freq)
+    for col in KLINE_COLUMNS:
+        if col not in frame.columns:
+            frame[col] = pd.NA
+    frame = frame[KLINE_COLUMNS]
+
     written: list[Path] = []
-    for year, group in frame.groupby(years, sort=True):
-        db_path = writer.root / str(year) / "year.duckdb"
-        merge_duckdb_table(db_path, f"minute_{freq}", group, ["ts_code", "trade_time"])
-        written.append(db_path)
+    for day, group in frame.groupby("trade_date", sort=True):
+        day = str(day)
+        path = Path(writer.root) / day[:4] / day[4:8] / "kline.parquet"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.is_file():
+            existing = pd.read_parquet(path)
+            group = pd.concat([existing, group], ignore_index=True)
+        group = group.drop_duplicates(subset=KLINE_DEDUP_KEYS, keep="last")
+        group.to_parquet(path, index=False)
+        written.append(path)
     return written
+
+
+KLINE_DEDUP_KEYS = ["ts_code", "trade_date", "trade_time", "data_type", "timeframe"]
+
+
+def _freq_label(freq: str) -> str:
+    return str(freq).strip().lower().replace("min", "m")

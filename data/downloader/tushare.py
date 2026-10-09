@@ -101,7 +101,7 @@ _SCOPE_FETCHERS: dict[str, ScopeSpec] = {
     "trade_data/daily": ScopeSpec(
         fetch=daily.fetch_daily,
         dedup_keys={
-            "market.bar": ("ts_code", "trade_date", "data_type", "timeframe"),
+            "market.bar": ("ts_code", "trade_date", "trade_time", "data_type", "timeframe"),
             "market.daily_metric": ("ts_code", "trade_date"),
         },
         description="daily bars -> {year}/kline.parquet + daily metrics -> {year}/daily_basic.parquet",
@@ -115,7 +115,7 @@ _SCOPE_FETCHERS: dict[str, ScopeSpec] = {
     "trade_data/minute": ScopeSpec(
         fetch=minute.fetch_minute,
         write=minute.write_minute,
-        description="intraday bars -> {year}/minute_{freq}.parquet (no mapping template)",
+        description="intraday bars -> {year}/{MMDD}/kline.parquet, unified kline store with timeframe column",
     ),
     "trade_data/moneyflow": ScopeSpec(
         fetch=moneyflow.fetch_moneyflow,
@@ -160,12 +160,12 @@ _SCOPE_FETCHERS: dict[str, ScopeSpec] = {
     ),
     "index/daily": ScopeSpec(
         fetch=index.fetch_index_daily,
-        dedup_keys=("ts_code", "trade_date", "data_type", "timeframe"),
+        dedup_keys=("ts_code", "trade_date", "trade_time", "data_type", "timeframe"),
         description="index daily bars -> {year}/kline.parquet (data_type=index)",
     ),
     "fund/daily": ScopeSpec(
         fetch=fund_daily.fetch_fund_daily,
-        dedup_keys=("ts_code", "trade_date", "data_type", "timeframe"),
+        dedup_keys=("ts_code", "trade_date", "trade_time", "data_type", "timeframe"),
         description="fund daily bars -> {year}/kline.parquet (data_type=fund)",
     ),
     "index/member": ScopeSpec(
