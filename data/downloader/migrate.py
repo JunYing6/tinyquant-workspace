@@ -32,9 +32,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pandas as pd
+import duckdb
 
-from data.downloader.base import merge_duckdb_table, read_duckdb_table
+from data.downloader.base import merge_duckdb_table, read_duckdb_table, RawVolumeWriter
 from data.downloader.pack import KLINE_TABLE, pack_kline
+from data.downloader.scopes import minute as minute_scope
 
 logger = logging.getLogger(__name__)
 
@@ -249,6 +251,44 @@ def migrate_year(root: Path, year: str, report: MigrationReport) -> None:
         report.deleted.append(str(kline_path))
 
 
+def migrate_minute_tables(root: str | Path, *, apply: bool = False) -> MigrationReport:
+    """把 ``year.duckdb`` 里的 ``minute_*`` 老表迁移到 per-day ``{year}/{MMDD}/kline.parquet``（方案乙）。
+
+    默认 dry-run：只转换 + 统计，不删表；``apply=True`` 才 ``DROP TABLE "minute_*"``。
+    """
+    root = Path(root)
+    report = MigrationReport()
+    for year_dir in sorted(p for p in root.iterdir() if p.is_dir() and p.name.isdigit()):
+        db_path = year_dir / YEAR_DB
+        if not db_path.is_file():
+            continue
+        con = duckdb.connect(str(db_path), read_only=True)
+        tables = [
+            r[0]
+            for r in con.execute(
+                "select table_name from information_schema.tables "
+                "where table_schema='main' and table_name like 'minute_%'"
+            ).fetchall()
+        ]
+        con.close()
+        for table in tables:
+            frame = read_duckdb_table(db_path, table)
+            if frame.empty:
+                report.skipped.append(f"{db_path}#{table} (empty)")
+                continue
+            freq = table.split("minute_", 1)[1]
+            written = minute_scope.write_minute(RawVolumeWriter(root), frame, freq=freq)
+            report.converted.append(f"{db_path}#{table}: {len(frame)} rows -> {len(written)} day file(s)")
+            if apply:
+                con = duckdb.connect(str(db_path))
+                con.execute(f'DROP TABLE "{table}"')
+                con.close()
+                report.deleted.append(f"{db_path}#{table}")
+            else:
+                report.validated.append(f"{db_path}#{table}: {len(frame)} rows")
+    return report
+
+
 def migrate_volume(root: str | Path, *, apply: bool = False) -> MigrationReport:
     """转换整个旧版卷；仅当 ``apply`` 时才删除旧版文件。"""
     root = Path(root)
@@ -287,17 +327,20 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="旧 parquet 卷 -> duckdb 整合布局迁移")
     parser.add_argument("root", help="数据卷根目录，如 E:/ProgramData")
     parser.add_argument("--apply", action="store_true", help="校验通过后删除旧 parquet（默认只转换+校验）")
+    parser.add_argument("--minute", action="store_true", help="改为迁移 year.duckdb 的 minute_* 老表到 per-day kline.parquet")
     args = parser.parse_args(argv)
 
-    report = migrate_volume(args.root, apply=args.apply)
+    report = migrate_minute_tables(args.root, apply=args.apply) if args.minute else migrate_volume(args.root, apply=args.apply)
     print(f"\n转换 {len(report.converted)} 项, 校验通过 {len(report.validated)} 项, "
           f"待删/已删 {len(report.deleted)} 项, 跳过 {len(report.skipped)} 项")
+    for line in report.converted:
+        print(f"  {line}")
     if report.failures:
         print("失败:")
         for failure in report.failures:
             print(f"  - {failure}")
         raise SystemExit(1)
-    print("全部校验通过" + ("，旧文件已删除" if args.apply else "（dry run，未删除）"))
+    print("全部校验通过" + ("，旧表已删除" if args.apply else "（dry run，未删除）"))
 
 
 if __name__ == "__main__":
