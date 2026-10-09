@@ -387,6 +387,8 @@ class WorkspaceBarAdapter:
                     continue
                 raw_volume = row.get("vol")
                 raw_turnover = row.get("amount")
+                volume = float(raw_volume) * _BAR_CONVERSIONS["volume"] if raw_volume == raw_volume and (raw_volume or 0) >= 0 else 0.0
+                turnover = float(raw_turnover) * _BAR_CONVERSIONS["turnover"] if raw_turnover == raw_turnover and (raw_turnover or 0) >= 0 else 0.0
                 records.append(Bar(
                     schema_version=SCHEMA_VERSION,
                     event_id=None,
@@ -406,8 +408,8 @@ class WorkspaceBarAdapter:
                     high=float(row["high"]),
                     low=float(row["low"]),
                     close=float(row["close"]),
-                    volume=float(raw_volume) * _BAR_CONVERSIONS["volume"] if raw_volume == raw_volume else 0.0,
-                    turnover=float(raw_turnover) * _BAR_CONVERSIONS["turnover"] if raw_turnover == raw_turnover else 0.0,
+                    volume=volume,
+                    turnover=turnover,
                     is_complete=True,
                     price_basis="raw",
                 ))
