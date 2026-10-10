@@ -17,7 +17,6 @@ from datetime import date, datetime, time
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
 from tools.data import (
     AdapterDescriptor,
     DataBatch,
@@ -88,20 +87,64 @@ class WorkspaceTickAdapter:
         raise ValueError(f"workspace-tick adapter does not serve {request.dataset!r}")
 
     def iter(self, request: DataRequest, chunk_size: int = 10_000):
-        batch = self.read(request)
-        if not batch.records:
-            yield batch
-            return
-        # 逐 chunk 产出全局 (event_time, code, seq) 有序的事件流：源数据按标的成组，
-        # 流式消费方需要跨标的的时间单调顺序。
-        records = sorted(batch.records, key=lambda r: (r.event_time, r.instrument_id, getattr(r, "sequence", 0) or 0))
-        for index in range(0, len(records), chunk_size):
-            yield self._batch(request, records[index:index + chunk_size], [])
+        """DuckDB 流式 tick 迭代：``WHERE code IN(...) AND time>=.. AND time<.. ORDER BY time, code``。
 
-    def _day_file(self, day: date, asset_type: str) -> Path:
-        sub = day.strftime("%m%d")
-        name = "stock.parquet" if asset_type == "equity" else "index.parquet"
-        return self._root / str(day.year) / sub / name
+        结果本身全局时间有序，直接 ``fetchmany`` 分批吐；一次取一批、逐行转事件，不整表物化。
+        """
+        if request.start is None or request.end is None:
+            raise ValueError("market.trade/quote requests require start and end (session bounds)")
+        days = date_range_days(request.start, request.end)
+        asset_filter = request.asset_type if request.asset_type in ("equity", "index") else None
+        asset_types = (asset_filter,) if asset_filter else ("equity", "index")
+        instruments = tuple(str(code) for code in (request.instruments or ()))
+        want_trades = request.dataset == "market.trade"
+        want_quotes = request.dataset == "market.quote"
+        for asset_type in asset_types:
+            for day in days:
+                path = self._day_file(day, asset_type)
+                if not path.is_file():
+                    continue
+                factor = _EQUITY_SIZE_FACTOR if asset_type == "equity" else _INDEX_SIZE_FACTOR
+                con, result, names = self._open_query(path, day, request, instruments)
+                try:
+                    counters: dict[str, int] = {}
+                    buffer: list[Any] = []
+                    while True:
+                        rows = result.fetchmany(chunk_size)
+                        if not rows:
+                            break
+                        for row in rows:
+                            for event in self._rows_to_events(dict(zip(names, row)), day, asset_type, factor, counters, want_trades, want_quotes, request.as_of):
+                                buffer.append(event)
+                        if len(buffer) >= chunk_size:
+                            yield self._batch(request, buffer, [])
+                            buffer = []
+                    if buffer:
+                        yield self._batch(request, buffer, [])
+                finally:
+                    con.close()
+
+    def _open_query(self, path: Path, day: date, request: DataRequest, instruments: tuple[str, ...]):
+        """DuckDB 查询：按 code + 时间过滤，`ORDER BY time, code` 输出全局时间有序。"""
+        import duckdb
+
+        first_day = day == (request.start.date() if isinstance(request.start, datetime) else request.start)
+        last_day = day == (request.end.date() if isinstance(request.end, datetime) else request.end)
+        start_t = request.start.time() if isinstance(request.start, datetime) and first_day else time(0, 0, 0)
+        end_t = request.end.time() if isinstance(request.end, datetime) and last_day else time(23, 59, 59)
+        if instruments:
+            marks = ",".join("?" * len(instruments))
+            where = f"code IN ({marks}) AND time >= ? AND time < ?"
+            params: list[Any] = [*instruments, start_t.strftime("%H:%M:%S"), end_t.strftime("%H:%M:%S")]
+        else:
+            where = "time >= ? AND time < ?"
+            params = [start_t.strftime("%H:%M:%S"), end_t.strftime("%H:%M:%S")]
+        path_literal = str(path).replace("'", "''")
+        sql = f"SELECT * FROM read_parquet('{path_literal}') WHERE {where} ORDER BY time, code"
+        con = duckdb.connect()
+        result = con.execute(sql, params)
+        names = tuple(d[0] for d in result.description)
+        return con, result, names
 
     def _read(self, request: DataRequest, *, want_trades: bool, want_quotes: bool) -> DataBatch:
         if request.start is None or request.end is None:
@@ -109,6 +152,7 @@ class WorkspaceTickAdapter:
         days = date_range_days(request.start, request.end)
         asset_filter = request.asset_type if request.asset_type in ("equity", "index") else None
         asset_types = (asset_filter,) if asset_filter else ("equity", "index")
+        instruments = tuple(str(code) for code in (request.instruments or ()))
 
         records: list[Any] = []
         used_files: list[Path] = []
@@ -118,90 +162,84 @@ class WorkspaceTickAdapter:
                 if not path.is_file():
                     continue
                 used_files.append(path)
-                frame = self._read_day(path, day, request, asset_type)
                 factor = _EQUITY_SIZE_FACTOR if asset_type == "equity" else _INDEX_SIZE_FACTOR
-                counters: dict[str, int] = {}
-                for row in frame.to_dict("records"):
-                    code = str(row.get("code"))
-                    event_time = self._event_time(day, str(row.get("time")))
-                    if request.as_of is not None and event_time > request.as_of:
-                        continue
-                    counters[code] = counters.get(code, -1) + 1
-                    sequence = counters[code]
-                    price = float(row.get("pr") or 0.0)
-                    bid_levels, ask_levels = self._levels(row, asset_type)
-                    if want_quotes and (bid_levels or ask_levels):
-                        records.append(
-                            QuoteTick(
-                                schema_version=SCHEMA_VERSION,
-                                event_id=None,
-                                instrument_id=code,
-                                asset_type=asset_type,
-                                effective_time=event_time,
-                                event_time=event_time,
-                                available_at=event_time,
-                                trading_date=day,
-                                source=SOURCE,
-                                quality="valid",
-                                metadata={},
-                                event_type="quote",
-                                bid_levels=tuple(bid_levels),
-                                ask_levels=tuple(ask_levels),
-                                last_price=price if price > 0 else None,
-                                last_size=float(row["vol"]) * factor if float(row.get("vol") or 0.0) > 0 else None,
-                                sequence=sequence,
-                            )
-                        )
-                    if want_trades and price > 0:
-                        records.append(
-                            TradeTick(
-                                schema_version=SCHEMA_VERSION,
-                                event_id=None,
-                                instrument_id=code,
-                                asset_type=asset_type,
-                                effective_time=event_time,
-                                event_time=event_time,
-                                available_at=event_time,
-                                trading_date=day,
-                                source=SOURCE,
-                                quality="valid",
-                                metadata={},
-                                event_type="trade",
-                                price=price,
-                                size=float(row.get("vol") or 0.0) * factor,
-                                turnover=float(row.get("amount") or 0.0),
-                                side=_SIDE_MAP.get(str(row.get("bs")), "UNKNOWN"),
-                                sequence=sequence,
-                            )
-                        )
+                con, result, names = self._open_query(path, day, request, instruments)
+                try:
+                    counters: dict[str, int] = {}
+                    for row in result.fetchmany(20_000):
+                        records.extend(self._rows_to_events(dict(zip(names, row)), day, asset_type, factor, counters, want_trades, want_quotes, request.as_of))
+                finally:
+                    con.close()
         records.sort(key=lambda r: (r.instrument_id, r.event_time, r.sequence))
         return self._batch(request, records, used_files)
 
-    def _read_day(
+    def _rows_to_events(
         self,
-        path: Path,
+        row: dict[str, Any],
         day: date,
-        request: DataRequest,
         asset_type: str,
-    ) -> pd.DataFrame:
-        filters: list[Any] = []
-        if request.instruments is not None:
-            filters.append(("code", "in", [str(code) for code in request.instruments]))
-        first_day = day == (request.start.date() if isinstance(request.start, datetime) else request.start)
-        last_day = day == (request.end.date() if isinstance(request.end, datetime) else request.end)
-        start_t = request.start.time() if isinstance(request.start, datetime) and first_day else time(0, 0, 0)
-        end_t = request.end.time() if isinstance(request.end, datetime) and last_day else time(23, 59, 59)
-        if start_t > time(0, 0, 0):
-            filters.append(("time", ">=", start_t.strftime("%H:%M:%S")))
-        if end_t > time(0, 0, 0) and end_t < time(23, 59, 59):
-            filters.append(("time", "<", end_t.strftime("%H:%M:%S")))
-        try:
-            frame = pd.read_parquet(path, filters=filters or None)
-        except Exception:
-            frame = pd.read_parquet(path)
-            if request.instruments is not None:
-                frame = frame[frame["code"].isin(request.instruments)]
-        return frame
+        factor: float,
+        counters: dict[str, int],
+        want_trades: bool,
+        want_quotes: bool,
+        as_of: datetime | None,
+    ) -> list[Any]:
+        """把 DuckDB 一行转成 0~2 个事件（同行的成交 + 盘口）。"""
+        code = str(row.get("code"))
+        event_time = self._event_time(day, str(row.get("time")))
+        if as_of is not None and event_time > as_of:
+            return []
+        sequence = counters.get(code, -1) + 1
+        counters[code] = sequence
+        price = float(row.get("pr") or 0.0)
+        bid_levels, ask_levels = self._levels(row, asset_type)
+        events: list[Any] = []
+        if want_quotes and (bid_levels or ask_levels):
+            events.append(QuoteTick(
+                schema_version=SCHEMA_VERSION,
+                event_id=None,
+                instrument_id=code,
+                asset_type=asset_type,
+                effective_time=event_time,
+                event_time=event_time,
+                available_at=event_time,
+                trading_date=day,
+                source=SOURCE,
+                quality="valid",
+                metadata={},
+                event_type="quote",
+                bid_levels=tuple(bid_levels),
+                ask_levels=tuple(ask_levels),
+                last_price=price if price > 0 else None,
+                last_size=float(row.get("vol") or 0.0) * factor if float(row.get("vol") or 0.0) > 0 else None,
+                sequence=sequence,
+            ))
+        if want_trades and price > 0:
+            events.append(TradeTick(
+                schema_version=SCHEMA_VERSION,
+                event_id=None,
+                instrument_id=code,
+                asset_type=asset_type,
+                effective_time=event_time,
+                event_time=event_time,
+                available_at=event_time,
+                trading_date=day,
+                source=SOURCE,
+                quality="valid",
+                metadata={},
+                event_type="trade",
+                price=price,
+                size=float(row.get("vol") or 0.0) * factor,
+                turnover=float(row.get("amount") or 0.0),
+                side=_SIDE_MAP.get(str(row.get("bs")), "UNKNOWN"),
+                sequence=sequence,
+            ))
+        return events
+
+    def _day_file(self, day: date, asset_type: str) -> Path:
+        sub = day.strftime("%m%d")
+        name = "stock.parquet" if asset_type == "equity" else "index.parquet"
+        return self._root / str(day.year) / sub / name
 
     @staticmethod
     def _event_time(day: date, clock: str) -> datetime:
@@ -210,8 +248,7 @@ class WorkspaceTickAdapter:
             parts.append(0)
         return datetime(day.year, day.month, day.day, parts[0], parts[1], parts[2], tzinfo=CST)
 
-    @staticmethod
-    def _levels(row: dict[str, Any], asset_type: str) -> tuple[list[PriceLevel], list[PriceLevel]]:
+    def _levels(self, row: dict[str, Any], asset_type: str) -> tuple[list[PriceLevel], list[PriceLevel]]:
         factor = _EQUITY_SIZE_FACTOR if asset_type == "equity" else _INDEX_SIZE_FACTOR
         bids: list[PriceLevel] = []
         asks: list[PriceLevel] = []
