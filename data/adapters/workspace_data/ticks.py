@@ -38,7 +38,20 @@ SCHEMA_VERSION = "1"
 SOURCE = "workspace-tick"
 
 _EQUITY_SIZE_FACTOR = 100.0  # 手 -> 股（股票）
+_TRADABLE_SIZE_FACTOR = 100.0  # 手 -> 份（ETF/LOF/可转债等场内交易品种）
 _INDEX_SIZE_FACTOR = 1.0  # 指数量保留数据源原生单位
+
+_ASSET_FILE = {
+    "equity": "stock.parquet",
+    "tradable": "tradable.parquet",
+    "index": "index.parquet",
+}
+_ASSET_FACTOR = {
+    "equity": _EQUITY_SIZE_FACTOR,
+    "tradable": _TRADABLE_SIZE_FACTOR,
+    "index": _INDEX_SIZE_FACTOR,
+}
+_ASSET_TYPES = ("equity", "tradable", "index")
 
 _SIDE_MAP = {"B": "BUY", "S": "SELL"}
 _LEVEL_COLUMNS = tuple((f"b{i}p", f"b{i}v") for i in range(1, 6))
@@ -50,7 +63,7 @@ def _capability(dataset: str) -> DatasetCapability:
     return DatasetCapability(
         dataset=dataset,
         modes=("historical",),
-        asset_types=frozenset({"equity", "index"}),
+        asset_types=frozenset(_ASSET_TYPES),
         frequencies=(),
         fields=tuple(definition.fields),
         point_in_time=definition.point_in_time,
@@ -74,7 +87,7 @@ class WorkspaceTickAdapter:
             realtime_modes=(),
             supports_point_in_time=True,
             supported_price_basis=frozenset({"raw"}),
-            supported_asset_types=frozenset({"equity", "index"}),
+            supported_asset_types=frozenset(_ASSET_TYPES),
             schema_versions=(SCHEMA_VERSION,),
             ordering_guarantee="per_instrument",
         )
@@ -87,42 +100,63 @@ class WorkspaceTickAdapter:
         raise ValueError(f"workspace-tick adapter does not serve {request.dataset!r}")
 
     def iter(self, request: DataRequest, chunk_size: int = 10_000):
-        """DuckDB 流式 tick 迭代：``WHERE code IN(...) AND time>=.. AND time<.. ORDER BY time, code``。
+        """DuckDB 流式 tick 迭代：多个资产文件（equity/tradable/index）各一路有序流，k 路归并。
 
-        结果本身全局时间有序，直接 ``fetchmany`` 分批吐；一次取一批、逐行转事件，不整表物化。
+        每个文件 ``WHERE code IN(...) AND time>=.. AND time<.. ORDER BY time, code`` 全局有序，
+        归并后仍全局时间序；一次取一批、逐行转事件，不整表物化。
         """
         if request.start is None or request.end is None:
             raise ValueError("market.trade/quote requests require start and end (session bounds)")
         days = date_range_days(request.start, request.end)
-        asset_filter = request.asset_type if request.asset_type in ("equity", "index") else None
-        asset_types = (asset_filter,) if asset_filter else ("equity", "index")
+        asset_filter = request.asset_type if request.asset_type in _ASSET_TYPES else None
+        asset_types = (asset_filter,) if asset_filter else _ASSET_TYPES
         instruments = tuple(str(code) for code in (request.instruments or ()))
         want_trades = request.dataset == "market.trade"
         want_quotes = request.dataset == "market.quote"
+
+        import heapq
+
+        stream_index = 0
+        heap: list[Any] = []
         for asset_type in asset_types:
             for day in days:
                 path = self._day_file(day, asset_type)
                 if not path.is_file():
                     continue
-                factor = _EQUITY_SIZE_FACTOR if asset_type == "equity" else _INDEX_SIZE_FACTOR
-                con, result, names = self._open_query(path, day, request, instruments)
-                try:
-                    counters: dict[str, int] = {}
-                    buffer: list[Any] = []
-                    while True:
-                        rows = result.fetchmany(chunk_size)
-                        if not rows:
-                            break
-                        for row in rows:
-                            for event in self._rows_to_events(dict(zip(names, row)), day, asset_type, factor, counters, want_trades, want_quotes, request.as_of):
-                                buffer.append(event)
-                        if len(buffer) >= chunk_size:
-                            yield self._batch(request, buffer, [])
-                            buffer = []
-                    if buffer:
-                        yield self._batch(request, buffer, [])
-                finally:
-                    con.close()
+                factor = _ASSET_FACTOR[asset_type]
+                stream = self._asset_stream(path, day, asset_type, factor, request, instruments, chunk_size, want_trades, want_quotes)
+                head = next(stream, None)
+                if head is not None:
+                    heapq.heappush(heap, ((head.event_time, getattr(head, "sequence", 0) or 0), stream_index, stream, head))
+                    stream_index += 1
+        buffer: list[Any] = []
+        while heap:
+            _key, _seq, stream, event = heapq.heappop(heap)
+            buffer.append(event)
+            if len(buffer) >= chunk_size:
+                yield self._batch(request, buffer, [])
+                buffer = []
+            head = next(stream, None)
+            if head is not None:
+                heapq.heappush(heap, ((head.event_time, getattr(head, "sequence", 0) or 0), stream_index, stream, head))
+                stream_index += 1
+        if buffer:
+            yield self._batch(request, buffer, [])
+
+    def _asset_stream(self, path, day, asset_type, factor, request, instruments, chunk_size, want_trades, want_quotes):
+        """一路资产文件的 DuckDB 流：逐批取、逐行转事件、吐事件。"""
+        con, result, names = self._open_query(path, day, request, instruments)
+        try:
+            counters: dict[str, int] = {}
+            while True:
+                rows = result.fetchmany(chunk_size)
+                if not rows:
+                    return
+                for row in rows:
+                    for event in self._rows_to_events(dict(zip(names, row)), day, asset_type, factor, counters, want_trades, want_quotes, request.as_of):
+                        yield event
+        finally:
+            con.close()
 
     def _open_query(self, path: Path, day: date, request: DataRequest, instruments: tuple[str, ...]):
         """DuckDB 查询：按 code + 时间过滤，`ORDER BY time, code` 输出全局时间有序。"""
@@ -150,8 +184,8 @@ class WorkspaceTickAdapter:
         if request.start is None or request.end is None:
             raise ValueError("market.trade/quote requests require start and end (session bounds)")
         days = date_range_days(request.start, request.end)
-        asset_filter = request.asset_type if request.asset_type in ("equity", "index") else None
-        asset_types = (asset_filter,) if asset_filter else ("equity", "index")
+        asset_filter = request.asset_type if request.asset_type in _ASSET_TYPES else None
+        asset_types = (asset_filter,) if asset_filter else _ASSET_TYPES
         instruments = tuple(str(code) for code in (request.instruments or ()))
 
         records: list[Any] = []
@@ -162,7 +196,7 @@ class WorkspaceTickAdapter:
                 if not path.is_file():
                     continue
                 used_files.append(path)
-                factor = _EQUITY_SIZE_FACTOR if asset_type == "equity" else _INDEX_SIZE_FACTOR
+                factor = _ASSET_FACTOR[asset_type]
                 con, result, names = self._open_query(path, day, request, instruments)
                 try:
                     counters: dict[str, int] = {}
@@ -238,7 +272,7 @@ class WorkspaceTickAdapter:
 
     def _day_file(self, day: date, asset_type: str) -> Path:
         sub = day.strftime("%m%d")
-        name = "stock.parquet" if asset_type == "equity" else "index.parquet"
+        name = _ASSET_FILE[asset_type]
         return self._root / str(day.year) / sub / name
 
     @staticmethod
@@ -249,7 +283,7 @@ class WorkspaceTickAdapter:
         return datetime(day.year, day.month, day.day, parts[0], parts[1], parts[2], tzinfo=CST)
 
     def _levels(self, row: dict[str, Any], asset_type: str) -> tuple[list[PriceLevel], list[PriceLevel]]:
-        factor = _EQUITY_SIZE_FACTOR if asset_type == "equity" else _INDEX_SIZE_FACTOR
+        factor = _ASSET_FACTOR[asset_type]
         bids: list[PriceLevel] = []
         asks: list[PriceLevel] = []
         for level, (price_col, size_col) in enumerate(_LEVEL_COLUMNS, start=1):
