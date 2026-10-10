@@ -329,6 +329,41 @@ def fix_intraday_data_type(root: str | Path, *, apply: bool = False) -> Migratio
     return report
 
 
+def prune_per_day_1d(root: str | Path, *, apply: bool = False) -> MigrationReport:
+    """从 per-day ``{MMDD}/kline.parquet`` 删除 ``timeframe='1d'`` 冗余行。
+
+    per-day 只应保存日内分钟级（如 ``30m``）；日线 1d 的权威在
+    ``{year}/year.duckdb#kline``。删除后校验剩余 1d 行数为 0。
+    默认 dry-run 只统计；``apply=True`` 才原子重写（临时文件 -> 替换）。
+    """
+    root = Path(root)
+    report = MigrationReport()
+    for year_dir in sorted(p for p in root.iterdir() if p.is_dir() and p.name.isdigit()):
+        for path in sorted(year_dir.glob("*/kline.parquet")):
+            frame = pd.read_parquet(path)
+            if "timeframe" not in frame.columns:
+                continue
+            mask = frame["timeframe"].eq(KLINE_BASE_TIMEFRAME)
+            removed = int(mask.sum())
+            if not removed:
+                continue
+            report.converted.append(f"{path}: 移除 {removed} 行 1d")
+            if apply:
+                keep = frame[~mask]
+                tmp = path.with_suffix(".parquet.tmp")
+                keep.to_parquet(tmp, index=False)
+                tmp.replace(path)
+                after = pd.read_parquet(path)
+                still = int(after["timeframe"].eq(KLINE_BASE_TIMEFRAME).sum()) if "timeframe" in after.columns else 0
+                if still:
+                    report.failures.append(f"{path}: 清理后仍有 {still} 行 1d")
+                else:
+                    report.validated.append(str(path))
+            else:
+                report.validated.append(f"{path}: dry-run 将移除 {removed} 行 1d")
+    return report
+
+
 def migrate_volume(root: str | Path, *, apply: bool = False) -> MigrationReport:
     """转换整个旧版卷；仅当 ``apply`` 时才删除旧版文件。"""
     root = Path(root)
@@ -369,9 +404,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--apply", action="store_true", help="校验通过后删除旧 parquet（默认只转换+校验）")
     parser.add_argument("--minute", action="store_true", help="改为迁移 year.duckdb 的 minute_* 老表到 per-day kline.parquet")
     parser.add_argument("--fix-data-type", action="store_true", help="校正 per-day 分钟行的 data_type（用 year#kline 的 code->类型）")
+    parser.add_argument("--prune-day-1d", action="store_true", help="从 per-day kline.parquet 删除冗余 1d 行（只留日内分钟）")
     args = parser.parse_args(argv)
 
-    if args.fix_data_type:
+    if args.prune_day_1d:
+        report = prune_per_day_1d(args.root, apply=args.apply)
+    elif args.fix_data_type:
         report = fix_intraday_data_type(args.root, apply=args.apply)
     elif args.minute:
         report = migrate_minute_tables(args.root, apply=args.apply)
