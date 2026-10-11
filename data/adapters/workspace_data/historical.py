@@ -235,7 +235,7 @@ class WorkspaceBarAdapter:
             sql = f"SELECT * FROM read_parquet('{path_literal}') WHERE {where} ORDER BY trade_time, ts_code"
             con = duckdb.connect()
             try:
-                reader = con.execute(sql, params).arrow()
+                reader = con.execute(sql, params).arrow(chunk_size)
                 buffer: list[Any] = []
                 for record_batch in reader:
                     for row in record_batch.to_pylist():

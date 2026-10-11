@@ -145,7 +145,7 @@ class WorkspaceTickAdapter:
 
     def _asset_stream(self, path, day, asset_type, factor, request, instruments, chunk_size, want_trades, want_quotes):
         """一路资产文件的 DuckDB 流：Arrow record-batch 分批取、逐行转事件、吐事件。"""
-        con, reader = self._open_query(path, day, request, instruments)
+        con, reader = self._open_query(path, day, request, instruments, rows_per_batch=chunk_size)
         try:
             counters: dict[str, int] = {}
             for batch in reader:
@@ -155,10 +155,11 @@ class WorkspaceTickAdapter:
         finally:
             con.close()
 
-    def _open_query(self, path: Path, day: date, request: DataRequest, instruments: tuple[str, ...]):
+    def _open_query(self, path: Path, day: date, request: DataRequest, instruments: tuple[str, ...], rows_per_batch: int = 1_000_000):
         """DuckDB 查询：按 code + 时间过滤，`ORDER BY time, code`；返回 Arrow record-batch reader。
 
-        用 ``.arrow()`` 流式 reader（快且有界），避免 ``fetchmany`` 在此类有序结果上的灾难性开销。
+        用 ``.arrow(rows_per_batch)`` 流式 reader（快且有界，``rows_per_batch`` 控制每批条数，
+        如 3000），避免 ``fetchmany`` 在此类有序结果上的不稳定开销。
         """
         import duckdb
 
@@ -176,7 +177,7 @@ class WorkspaceTickAdapter:
         path_literal = str(path).replace("'", "''")
         sql = f"SELECT * FROM read_parquet('{path_literal}') WHERE {where} ORDER BY time, code"
         con = duckdb.connect()
-        reader = con.execute(sql, params).arrow()
+        reader = con.execute(sql, params).arrow(rows_per_batch)
         return con, reader
 
     def _read(self, request: DataRequest, *, want_trades: bool, want_quotes: bool) -> DataBatch:
