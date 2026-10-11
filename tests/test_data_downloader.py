@@ -738,13 +738,13 @@ SCOPE_CASES = [
     pytest.param(
         "index/daily",
         {},
-        {("2024/0102/kline.parquet", None): None, (YEAR_DB, "kline"): None},
+        {(YEAR_DB, "kline"): None},
         id="index/daily",
     ),
     pytest.param(
         "fund/daily",
         {},
-        {("2024/0102/kline.parquet", None): None, (YEAR_DB, "kline"): None},
+        {(YEAR_DB, "kline"): None},
         id="fund/daily",
     ),
     pytest.param(
@@ -892,25 +892,14 @@ def test_scope_download_is_idempotent(downloader, root, scope, options, expected
 # ---------------------------------------------------------------------------
 
 
-def test_daily_scope_writes_day_files_and_packed_tables(downloader, root):
+def test_daily_scope_writes_year_kline_table(downloader, root):
     paths = downloader.download("trade_data/daily", START, END)
 
-    # 每日K线文件是原始层；daily_metric 表与年度库共用
-    assert {p.relative_to(root) for p in paths} == {
-        Path("2024") / "0102" / "kline.parquet",
-        Path("2024") / "0103" / "kline.parquet",
-        Path(YEAR_DB),
-    }
-    day_frame = pl.read_parquet(root / "2024" / "0102" / "kline.parquet").to_pandas()
-    assert list(day_frame.columns) == [
-        "ts_code", "trade_date", "trade_time", "open", "high", "low", "close", "pre_close",
-        "pct_chg", "vol", "amount", "adj_factor", "name", "data_type", "timeframe",
-        "change",
-    ]
-    assert set(day_frame["data_type"]) == {"stock"}
+    # 日线直接写入年度 duckdb#kline（无 per-day 文件、无单独 pack 步骤）
+    assert {p.relative_to(root) for p in paths} == {Path(YEAR_DB)}
 
-    # 打包后的年度 kline 表（自动打包）+ 每日指标表
     kline = read_duckdb_table(root / YEAR_DB, "kline")
+    assert set(kline["timeframe"]) == {"1d"}
     assert len(kline[kline["timeframe"] == "1d"]) == len(TRADING_DAYS)
     basic = read_duckdb_table(root / YEAR_DB, "daily_basic")
     assert list(basic.columns) == [
@@ -921,22 +910,6 @@ def test_daily_scope_writes_day_files_and_packed_tables(downloader, root):
     ]
     assert len(basic) == len(TRADING_DAYS)
     assert basic["limit"][0] == "U"
-
-
-def test_kline_pack_derives_multi_day_timeframes(downloader, root):
-    downloader.download("trade_data/daily", START, END)
-    kline = read_duckdb_table(root / YEAR_DB, "kline")
-
-    blocks = kline[kline["timeframe"] == "5d"]
-    assert len(blocks) == 1  # 2 个交易日组成一个 5 日块
-    block = blocks.iloc[0]
-    assert block["trade_date"] == "20240103"  # 块在最后一天结束
-    assert block["open"] == 9.39 and block["close"] == 9.30
-    assert block["vol"] == 200000.0 and block["amount"] == 186000.0
-    assert block["pre_close"] is None or pd.isna(block["pre_close"])  # 没有更早的块
-
-    ten_day = kline[kline["timeframe"] == "10d"]
-    assert len(ten_day) == 1
 
 
 def test_daily_repeated_download_merges_and_refreshes(downloader, root):
@@ -953,9 +926,6 @@ def test_daily_repeated_download_merges_and_refreshes(downloader, root):
     downloader._client.daily = shifted
     downloader.download("trade_data/daily", START, END)
 
-    day_frame = pl.read_parquet(root / "2024" / "0102" / "kline.parquet").to_pandas()
-    assert len(day_frame) == 1  # 每个文件一天
-    assert set(day_frame["close"]) == {9.99}
     kline = read_duckdb_table(root / YEAR_DB, "kline")
     base = kline[kline["timeframe"] == "1d"]
     assert len(base) == len(TRADING_DAYS)
@@ -978,14 +948,14 @@ def test_index_and_fund_bars_share_the_kline_layout(downloader, root):
     downloader.download("index/daily", START, END)
     downloader.download("fund/daily", START, END)
 
-    day_frame = pl.read_parquet(root / "2024" / "0102" / "kline.parquet").to_pandas()
-    assert set(day_frame["data_type"]) == {"stock", "index", "fund"}
+    # 股票/指数/基金日线共用年度 year.duckdb#kline（data_type 区分）
     kline = read_duckdb_table(root / YEAR_DB, "kline")
     base = kline[kline["timeframe"] == "1d"]
+    assert {"stock", "index", "fund"} <= set(base["data_type"])
     assert len(base) == len(base.drop_duplicates(subset=["ts_code", "trade_date", "data_type", "timeframe"]))
 
 
-def test_breadth_is_aggregated_from_the_day_files(downloader, root):
+def test_breadth_is_aggregated_from_the_year_kline(downloader, root):
     assert downloader.download("trade_data/daily", START, END)
 
     paths = downloader.download("trade_data/breadth", START, END)
@@ -1298,10 +1268,8 @@ def test_migration_converts_validates_and_deletes(tmp_path):
 
     kline = read_duckdb_table(root / "2024" / "year.duckdb", "kline")
     base = kline[kline["timeframe"] == "1d"]
-    assert len(base) == 2  # 两个交易日都从年度文件打包而来
-    assert set(kline["timeframe"]) == {"1d", "5d", "10d"}
-    # 逐笔日获得其每日 kline 镜像
-    assert (root / "2024" / "0102" / "kline.parquet").is_file()
+    assert len(base) == 2  # 两个交易日的 1d 行汇入年度库
+    assert set(kline["timeframe"]) == {"1d"}  # 不再派生 5d/10d（无 pack 步骤）
 
     member = read_duckdb_table(root / "2024" / "year.duckdb", "index_member")
     assert len(member) == 1 and member["trade_date"][0] == "20240102"
@@ -1320,10 +1288,8 @@ def test_migration_converts_validates_and_deletes(tmp_path):
     assert not (root / "2023" / "kline.parquet").exists()
     # 逐笔 parquet 保留
     assert (root / "2024" / "0102" / "stock.parquet").is_file()
-    # 每日目录恰好保留逐笔卷 + 每日 kline 镜像
-    assert sorted(p.name for p in (root / "2024" / "0102").iterdir()) == [
-        "kline.parquet", "stock.parquet",
-    ]
+    # 每日目录只保留逐笔卷（日线镜像已不再写入 per-day）
+    assert sorted(p.name for p in (root / "2024" / "0102").iterdir()) == ["stock.parquet"]
 
     # 幂等：重新迁移找不到任何待转换内容
     rerun = migrate_volume(root, apply=True)

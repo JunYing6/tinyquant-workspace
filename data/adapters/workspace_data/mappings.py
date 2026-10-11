@@ -49,7 +49,6 @@ LEGACY_BAR = ("{year}/year.duckdb#kline",)
 LEGACY_DAILY_BASIC = ("{year}/year.duckdb#daily_basic",)
 LEGACY_TICK_DAY = ("{year}/{MMDD}/stock.parquet", "{year}/{MMDD}/tradable.parquet")
 LEGACY_INDEX_TICK_DAY = ("{year}/{MMDD}/index.parquet",)
-LEGACY_BAR_DAY_WRITE = ("{year}/{MMDD}/kline.parquet",)
 
 
 @dataclass(frozen=True)
@@ -175,7 +174,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         missing_semantics="pct_chg/change keep sign semantics; NaN change on first bar",
         source_revision_rule="md5 over (path, size, mtime) of the yearly duckdb files used",
         implemented=True,
-        write_targets=LEGACY_BAR_DAY_WRITE,
+        write_targets=LEGACY_BAR,
     ),
     _mapping(
         "market.daily_metric",
@@ -238,7 +237,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         time_conversion="kline rows with data_type=index -> index.bar view of market.bar",
         pit_rule=BAR_PIT,
         implemented=True,
-        write_targets=LEGACY_BAR_DAY_WRITE,
+        write_targets=LEGACY_BAR,
     ),
     _mapping(
         "fund.bar",
@@ -250,7 +249,7 @@ MIGRATION_MAPPINGS: tuple[MigrationMapping, ...] = (
         time_conversion="kline rows with data_type=fund -> fund.bar view of market.bar",
         pit_rule=BAR_PIT,
         implemented=True,
-        write_targets=LEGACY_BAR_DAY_WRITE,
+        write_targets=LEGACY_BAR,
     ),
     _mapping(
         "market.daily_snapshot",

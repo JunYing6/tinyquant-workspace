@@ -29,8 +29,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 import pandas as pd
 
-from data.downloader.base import RawVolumeWriter, dataset_for_scope
-from data.downloader.pack import pack_kline
+from data.downloader.base import RawVolumeWriter
 from data.downloader.scopes import (
     balance,
     block_trade,
@@ -364,14 +363,12 @@ class TushareDownloader:
         end: str,
         *,
         options: Mapping[str, Any] | None = None,
-        pack: bool = True,
         **write_kwargs: Any,
     ) -> list[Path]:
         """拉取 ``scope`` 并落到映射布局；返回受影响的路径。
 
-        日线类 scope 落成按日 ``kline.parquet`` 文件，随后重新打包
-        该年 ``year.duckdb#kline`` 表（1d 行 + 派生的 5d/10d 周期），
-        除非 ``pack=False``。
+        日线类 scope 直接写入年度 ``year.duckdb#kline``；日内 scope 写入
+        per-day ``kline.parquet``。不再存在独立的 kline pack 步骤。
         """
         spec = _require_spec(scope)
         payload = self.fetch(scope, start, end, **(options or {}))
@@ -396,8 +393,6 @@ class TushareDownloader:
         else:
             paths = self._write_scope(scope, spec, payload, **write_kwargs)
 
-        if pack:
-            self._pack_kline_years(scope, paths)
         return paths
 
     # -- 内部方法 ------------------------------------------------------------
@@ -439,18 +434,6 @@ class TushareDownloader:
         # 无日历接口的最小客户端：退化为朴素的
         # 日历日遍历（旧版骨架行为）
         return calendar.naive_calendar_days(start, end)
-
-    def _pack_kline_years(self, scope: str, paths: list[Path]) -> None:
-        """在日线类 scope 改动日文件后重新打包年度 kline 表。"""
-        if dataset_for_scope(scope) not in ("market.bar", "index.bar", "fund.bar"):
-            return
-        # 按日文件位于 {year}/{MMDD}/kline.parquet
-        years = sorted(
-            {path.parent.parent.name for path in paths if path.name == "kline.parquet"}
-        )
-        for year in years:
-            pack_kline(self._writer.root, year)
-
 
 def _require_spec(scope: str) -> ScopeSpec:
     spec = _SCOPE_FETCHERS.get(scope)

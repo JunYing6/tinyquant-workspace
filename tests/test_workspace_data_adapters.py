@@ -17,7 +17,7 @@ from tools.data import (
     default_catalog,
 )
 
-from data.downloader import RawVolumeWriter, pack_kline
+from data.downloader import RawVolumeWriter
 from data.adapters.workspace_data import (
     MIGRATION_MAPPINGS,
     WorkspaceBarAdapter,
@@ -411,6 +411,7 @@ def test_dataset_for_scope_reverse_lookup() -> None:
 
 def test_raw_volume_writer_lands_legacy_layout(tmp_path) -> None:
     from data.downloader import RawVolumeWriter
+    from data.downloader.base import read_duckdb_table
 
     writer = RawVolumeWriter(tmp_path)
     frame = pd.DataFrame(
@@ -421,13 +422,13 @@ def test_raw_volume_writer_lands_legacy_layout(tmp_path) -> None:
         }
     )
     written = writer.write_scope("trade_data/daily", frame)
-    assert written == [tmp_path / "2024" / "0102" / "kline.parquet"]
-    stored = pd.read_parquet(written[0])
+    assert written == [tmp_path / "2024" / "year.duckdb"]
+    stored = read_duckdb_table(written[0], "kline")
     assert len(stored) == 1
 
     # 第二次写入会合并并去重完全相同的行
     writer.write_scope("trade_data/daily", frame)
-    stored = pd.read_parquet(written[0])
+    stored = read_duckdb_table(written[0], "kline")
     assert len(stored) == 1
 
 
@@ -502,9 +503,8 @@ def test_derived_indicator_adapter_computes_ma(tmp_path) -> None:
 def _make_volume(root) -> None:
     """通过下载器写入流程构建的合成整合布局卷。
 
-    走一遍 ``RawVolumeWriter`` + ``pack_kline`` 可使该夹具与真实下载路径在
-    构造上保持一致。逐笔日文件由生产环境中的 ``tick_import`` 写入，是原始
-    厂商布局的 parquet，这里直接写入。
+    走一遍 ``RawVolumeWriter`` 可使该夹具与真实下载路径在构造上保持一致。
+    日线经 ``write_dataset("market.bar")`` 直写年度 ``year.duckdb#kline``。
     """
     import pathlib
 
@@ -576,7 +576,6 @@ def _make_volume(root) -> None:
         }
     )
     writer.write_dataset("market.bar", kline)
-    pack_kline(root, "2024")
     # 年度每日指标：市值单位为万元
     writer.write_dataset(
         "market.daily_metric",

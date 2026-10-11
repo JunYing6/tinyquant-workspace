@@ -42,7 +42,6 @@ import pandas as pd
 import duckdb
 
 from data.downloader.base import merge_duckdb_table, read_duckdb_table, RawVolumeWriter
-from data.downloader.pack import KLINE_BASE_TIMEFRAME, KLINE_TABLE, pack_kline
 from data.downloader.scopes import minute as minute_scope
 
 logger = logging.getLogger(__name__)
@@ -70,6 +69,8 @@ MINUTE_TABLE_PREFIX = "minute_"
 REFERENCE_TABLES_IN_YEARS = ("income_report", "balance_report", "cashflow_report")
 
 KLINE_DEDUPE_KEYS = ["ts_code", "trade_date", "data_type", "timeframe"]
+KLINE_TABLE = "kline"
+KLINE_BASE_TIMEFRAME = "1d"
 
 
 @dataclass
@@ -210,34 +211,17 @@ def migrate_year(root: Path, year: str, report: MigrationReport) -> None:
             if day_dir.is_dir() and day_dir.name.isdigit() and not any(day_dir.iterdir()):
                 day_dir.rmdir()
 
-    # kline: 将年度厂商行汇入 year.duckdb#kline（1d 基表），
-    # 对已有日线目录的日期将其镜像进按日文件（在存在分笔处保持每日 4 文件
-    # 布局），打包派生周期，然后删除旧版年度文件。没有任何日线目录的年份
-    # 其 bar 仅存于数据库中。
+    # kline: 将年度厂商 1d 行汇入 year.duckdb#kline（日线权威）。
+    # per-day kline.parquet 只存日内分钟（由分钟迁移/下载写入），此处不再
+    # 镜像 1d 行；派生日线（5d/10d）由年度库维护，不再有独立 pack 步骤。
     kline_path = year_dir / "kline.parquet"
     if kline_path.is_file():
         frame = pd.read_parquet(kline_path)
         # 将空的 trade_date 保留为 NULL（绝不用字符串 "nan"）：少数旧版
-        # 行只带有 adj_factor 而无日期/价格——原样保留，日线镜像与 bar
-        # 派生时跳过
+        # 行只带有 adj_factor 而无日期/价格——原样保留，校验时跳过
         frame["trade_date"] = frame["trade_date"].astype("string")
         merge_duckdb_table(db_path, KLINE_TABLE, frame, KLINE_DEDUPE_KEYS)
 
-        written_days = 0
-        dated = frame[frame["trade_date"].notna()]
-        for trade_date, group in dated.groupby("trade_date"):
-            day_dir = year_dir / trade_date[4:8]
-            if not day_dir.is_dir():
-                continue
-            target = day_dir / "kline.parquet"
-            if target.is_file():
-                existing = pd.read_parquet(target)
-                group = pd.concat([existing, group], ignore_index=True)
-                group = group.drop_duplicates(subset=KLINE_DEDUPE_KEYS, keep="last")
-            group.to_parquet(target, index=False)
-            written_days += 1
-
-        pack_kline(root, year)
         table_frame = read_duckdb_table(db_path, KLINE_TABLE)
         base = table_frame[table_frame["timeframe"] == "1d"] if "timeframe" in table_frame.columns else table_frame
         if len(base) < len(frame):
@@ -252,8 +236,7 @@ def migrate_year(root: Path, year: str, report: MigrationReport) -> None:
             raise SystemExit(f"kline validation failed for {year}: {missing} source rows missing")
         report.converted.append(str(kline_path))
         report.validated.append(
-            f"{year}.kline (1d {len(base)} rows >= source {len(frame)}; "
-            f"{written_days} day files mirrored)"
+            f"{year}.kline (1d {len(base)} rows >= source {len(frame)})"
         )
         report.deleted.append(str(kline_path))
 

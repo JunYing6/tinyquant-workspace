@@ -24,7 +24,6 @@ from data.downloader.base import (
     read_duckdb_table,
 )
 from data.downloader.migrate import migrate_volume
-from data.downloader.pack import derive_multi_day_bars, pack_kline
 from data.downloader.tick_import import import_date_range, import_single_csv
 from data.downloader.tushare import (
     _SCOPE_FETCHERS,
@@ -47,13 +46,11 @@ __all__ = [
     "ScopeSpec",
     "TushareDownloader",
     "dataset_for_scope",
-    "derive_multi_day_bars",
     "import_date_range",
     "import_single_csv",
     "list_scopes",
     "merge_duckdb_table",
     "migrate_volume",
-    "pack_kline",
     "read_duckdb_table",
     "uncovered_legacy_scopes",
 ]
