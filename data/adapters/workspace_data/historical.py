@@ -208,7 +208,90 @@ class WorkspaceBarAdapter:
         raise ValueError(f"workspace-bar adapter does not serve {request.dataset!r}")
 
     def iter(self, request: DataRequest, chunk_size: int = 10_000):
+        freq = request.frequency or "1d"
+        if freq and freq[-1] in ("m", "h"):
+            yield from self._iter_intraday(request, freq, chunk_size)
+            return
         yield self.read(request)
+
+    def _iter_intraday(self, request: DataRequest, freq: str, chunk_size: int):
+        """日内频率流式：per-day ``kline.parquet`` 用 DuckDB 游标按 ``trade_time, ts_code`` 有序分批吐。"""
+        import duckdb
+
+        wanted_asset = {"market.bar": None, "index.bar": "index", "fund.bar": "fund"}[request.dataset]
+        step = _intraday_delta(freq)
+        instruments = tuple(str(code) for code in (request.instruments or ()))
+        for day in date_range_days(request.start, request.end):
+            path = self._root / str(day.year) / day.strftime("%m%d") / "kline.parquet"
+            if not path.is_file():
+                continue
+            where = "timeframe = ?"
+            params: list[Any] = [freq]
+            if instruments:
+                where += f" AND ts_code IN ({','.join('?' * len(instruments))})"
+                params.extend(instruments)
+            path_literal = str(path).replace("'", "''")
+            sql = f"SELECT * FROM read_parquet('{path_literal}') WHERE {where} ORDER BY trade_time, ts_code"
+            con = duckdb.connect()
+            try:
+                result = con.execute(sql, params)
+                names = tuple(d[0] for d in result.description)
+                buffer: list[Any] = []
+                while True:
+                    rows = result.fetchmany(chunk_size)
+                    if not rows:
+                        break
+                    for row in rows:
+                        bar = self._intraday_row_to_bar(dict(zip(names, row)), day, freq, step, wanted_asset)
+                        if bar is not None:
+                            buffer.append(bar)
+                    if len(buffer) >= chunk_size:
+                        yield _batch(ADAPTER_NAME, source_revision([path]), request, request.dataset, tuple(buffer))
+                        buffer = []
+                if buffer:
+                    yield _batch(ADAPTER_NAME, source_revision([path]), request, request.dataset, tuple(buffer))
+            finally:
+                con.close()
+
+    @staticmethod
+    def _intraday_row_to_bar(row: dict[str, Any], day: date, freq: str, step: timedelta, wanted_asset: str | None) -> Any:
+        if wanted_asset is not None and ASSET_TYPE_MAP.get(str(row.get("data_type"))) != wanted_asset:
+            return None
+        ts = pd.to_datetime(row.get("trade_time"), errors="coerce")
+        if ts is None or ts is pd.NaT:
+            return None
+        interval_end = ts.to_pydatetime().replace(tzinfo=CST)
+        prices = [row.get(c) for c in ("open", "high", "low", "close")]
+        if any(v is None or v != v for v in prices):
+            return None
+        raw_volume = row.get("vol")
+        raw_turnover = row.get("amount")
+        volume = float(raw_volume) * _BAR_CONVERSIONS["volume"] if raw_volume == raw_volume and (raw_volume or 0) >= 0 else 0.0
+        turnover = float(raw_turnover) * _BAR_CONVERSIONS["turnover"] if raw_turnover == raw_turnover and (raw_turnover or 0) >= 0 else 0.0
+        return Bar(
+            schema_version=SCHEMA_VERSION,
+            event_id=None,
+            instrument_id=str(row["ts_code"]),
+            asset_type=ASSET_TYPE_MAP.get(str(row.get("data_type")), "equity"),
+            effective_time=interval_end,
+            event_time=interval_end,
+            available_at=interval_end,
+            trading_date=day,
+            source=SOURCE,
+            quality="valid",
+            metadata={},
+            frequency=freq,
+            interval_start=interval_end - step,
+            interval_end=interval_end,
+            open=float(row["open"]),
+            high=float(row["high"]),
+            low=float(row["low"]),
+            close=float(row["close"]),
+            volume=volume,
+            turnover=turnover,
+            is_complete=True,
+            price_basis="raw",
+        )
 
     def _resolve_range(self, request: DataRequest) -> tuple[date | None, date | None]:
         """解析起止日期，通过日历把 anchor + session_window 换算为具体区间。"""
