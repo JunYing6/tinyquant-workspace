@@ -38,6 +38,7 @@ from tools.data import (
     default_catalog,
 )
 
+from data.adapters.workspace_data.mappings import MAPPINGS_BY_DATASET
 from data.adapters.workspace_data.reader import (
     ASSET_TYPE_MAP,
     CST,
@@ -70,6 +71,26 @@ _FUNDAMENTAL_TABLES = {
     "fundamental.cashflow": "cashflow_report",
 }
 _FUNDAMENTAL_REPORT_TYPE = "1"  # tushare report_type=1 合并报表
+
+# 数据驱动的二期表：dataset -> {table, scope, level?, scale?}
+# scope: "root"=reference.duckdb；"year"=逐 {year}/year.duckdb
+# level: 按 level 列过滤（如 margin 的 summary/detail）
+# scale: [(字段名或后缀, 乘数)]，如 [("_amount",1000.0)]
+_MAPPED_TABLES = {
+    "market.money_flow": {"table": "moneyflow", "scope": "year", "scale": [("_amount", 1000.0), ("_vol", 100.0)]},
+    "market.margin": {"table": "margin", "scope": "year", "level": "summary"},
+    "market.margin_detail": {"table": "margin", "scope": "year", "level": "detail"},
+    "market.breadth": {"table": "market_breadth", "scope": "year"},
+    "market.northbound_summary": {"table": "moneyflow_hsgt", "scope": "year"},
+    "event.forecast": {"table": "forecast", "scope": "root"},
+    "event.top_holder": {"table": "top10_holder", "scope": "root"},
+    "event.holder_trade": {"table": "holdertrade", "scope": "root"},
+    "event.holder_number": {"table": "stk_holdernumber", "scope": "year"},
+    "event.block_trade": {"table": "block_trade", "scope": "year", "scale": [("quantity", 100.0), ("turnover", 1000.0)]},
+    "fundamental.indicator": {"table": "fina_indicator", "scope": "root"},
+    "index.member": {"table": "index_member", "scope": "year"},
+}
+_MAPPED_DATASETS = tuple(_MAPPED_TABLES)
 _BAR_CONVERSIONS = {"volume": 100.0, "turnover": 1000.0}  # 手 -> 股，千元 -> 元
 _INDEX_VOLUME_FACTOR = 1.0  # 指数量保留数据源原生单位（参见 mappings）
 
@@ -484,27 +505,30 @@ class WorkspaceBarAdapter:
 class WorkspaceTableAdapter:
     """提供 PIT 表数据集（每日估值指标、master 数据、成分归属）。"""
 
-    DATASETS = ("market.daily_metric", "instrument.master", "industry.membership", "fundamental.income", "fundamental.balance", "fundamental.cashflow")
+    DATASETS = ("market.daily_metric", "instrument.master", "industry.membership", "fundamental.income", "fundamental.balance", "fundamental.cashflow", *_MAPPED_DATASETS)
 
     def __init__(self, data_root: str | Path, market: str = MARKET) -> None:
         self._root = Path(data_root)
         self._market = market
         self._open_days_cache: list[date] | None = None
+        dataset_caps = {
+            "market.daily_metric": _capability("market.daily_metric", frequencies=()),
+            "instrument.master": _capability("instrument.master", frequencies=()),
+            "industry.membership": _capability("industry.membership", frequencies=()),
+            "fundamental.income": _capability("fundamental.income", frequencies=()),
+            "fundamental.balance": _capability("fundamental.balance", frequencies=()),
+            "fundamental.cashflow": _capability("fundamental.cashflow", frequencies=()),
+        }
+        for name in _MAPPED_DATASETS:
+            dataset_caps[name] = _capability(name, frequencies=())
         self.descriptor = AdapterDescriptor(
             name=TABLE_ADAPTER_NAME,
-            datasets={
-                "market.daily_metric": _capability("market.daily_metric", frequencies=()),
-                "instrument.master": _capability("instrument.master", frequencies=()),
-                "industry.membership": _capability("industry.membership", frequencies=()),
-                "fundamental.income": _capability("fundamental.income", frequencies=()),
-                "fundamental.balance": _capability("fundamental.balance", frequencies=()),
-                "fundamental.cashflow": _capability("fundamental.cashflow", frequencies=()),
-            },
+            datasets=dataset_caps,
             historical_modes=("historical",),
             realtime_modes=(),
             supports_point_in_time=True,
             supported_price_basis=frozenset({"raw"}),
-            supported_asset_types=frozenset({"equity"}),
+            supported_asset_types=frozenset({"equity", "index", "fund", "market"}),
             schema_versions=(SCHEMA_VERSION,),
         )
 
@@ -517,6 +541,8 @@ class WorkspaceTableAdapter:
             return self._read_industry(request)
         if request.dataset in _FUNDAMENTAL_TABLES:
             return self._read_fundamental(request)
+        if request.dataset in _MAPPED_TABLES:
+            return self._read_mapped(request)
         raise ValueError(f"workspace-table adapter does not serve {request.dataset!r}")
 
     def iter(self, request: DataRequest, chunk_size: int = 10_000):
@@ -688,7 +714,7 @@ class WorkspaceTableAdapter:
                 "source": SOURCE,
                 "quality": "valid",
                 "metadata": {},
-                "revision": str(raw.get("update_flag") or ""),
+                "revision": _int_or_zero(raw.get("update_flag")),
             }
             for name in fields:
                 if name in record:
@@ -698,8 +724,104 @@ class WorkspaceTableAdapter:
         records.sort(key=lambda r: (r["instrument_id"], r["report_date"]))
         return _batch(TABLE_ADAPTER_NAME, source_revision([db_path]), request, request.dataset, tuple(records))
 
+    # -- 二期数据驱动表（行情资金流/两融/事件/宏观等） -------------------------
+
+    def _read_mapped(self, request: DataRequest) -> DataBatch:
+        """按 ``_MAPPED_TABLES`` 规格通用读取：别名映射 + level 过滤 + 单位换算 + DAY_CLOSE PIT。"""
+        spec = _MAPPED_TABLES[request.dataset]
+        definition = default_catalog().get(request.dataset)
+        aliases = dict(MAPPINGS_BY_DATASET[request.dataset].field_aliases)
+        scale = spec.get("scale") or []
+        level = spec.get("level")
+        asset_default = next(iter(definition.asset_types), "equity")
+        if spec["scope"] == "root":
+            db_files = [self._root / REFERENCE_DB]
+        else:
+            db_files = [p for p in resolve_year_dbs(self._root, request.start, request.end) if p.is_file()]
+
+        records: list[dict[str, Any]] = []
+        seen: set[tuple] = set()
+        for db_path in db_files:
+            if not db_path.is_file():
+                continue
+            for raw in read_rows(db_path, spec["table"]):
+                if level is not None and str(raw.get("level")) != level:
+                    continue
+                row = {aliases.get(key, key): value for key, value in raw.items()}
+                code = row.get("instrument_id")
+                if request.instruments is not None and code not in request.instruments:
+                    continue
+                ann_raw = row.get("available_at")
+                ann_date = parse_yyyymmdd(ann_raw) if ann_raw is not None else None
+                primary = None
+                for candidate in ("trading_date", "report_date", "event_date", "effective_date", "observation_date"):
+                    if row.get(candidate) is not None:
+                        primary = parse_yyyymmdd(row[candidate])
+                        break
+                announcement = ann_date or primary
+                if announcement is None:
+                    continue
+                available_at = announcement_close(announcement)
+                if request.as_of is not None and available_at > request.as_of:
+                    continue
+                if "event_id" in definition.fields:
+                    row.setdefault("event_id", f"{code or 'X'}-{announcement.isoformat()}-{len(records)}")
+                if "event_date" in definition.required_fields and row.get("event_date") is None:
+                    row["event_date"] = row.get("report_date") or row.get("available_at")
+                dedup_key = (code, primary, tuple(str(row.get(n)) for n in definition.ordering))
+                if dedup_key in seen:
+                    continue
+                seen.add(dedup_key)
+                records.append(_project(self._mapped_record(definition, row, available_at, asset_default, scale), request.fields))
+        records.sort(key=lambda r: tuple(str(r.get(n) if r.get(n) is not None else "") for n in definition.ordering))
+        return _batch(TABLE_ADAPTER_NAME, source_revision(db_files), request, request.dataset, tuple(records))
+
+    def _mapped_record(self, definition: Any, row: dict[str, Any], available_at: datetime, asset_default: str, scale: list) -> dict[str, Any]:
+        record: dict[str, Any] = {}
+        for name, fd in definition.fields.items():
+            if name == "source":
+                record[name] = SOURCE
+            elif name == "quality":
+                record[name] = "valid"
+            elif name == "metadata":
+                record[name] = {}
+            elif name == "revision":
+                record[name] = _int_or_zero(row.get("update_flag"))
+            elif name == "asset_type":
+                record[name] = asset_default
+            elif name == "available_at":
+                record[name] = available_at
+            elif fd.python_type is date:
+                record[name] = parse_yyyymmdd(row.get(name))
+            elif fd.python_type is datetime:
+                record[name] = available_at
+            else:
+                value = row.get(name)
+                if value is not None:
+                    for pattern, factor in scale:
+                        if name == pattern or name.endswith(pattern):
+                            value = float(value) * factor
+                            break
+                    types = fd.python_type if isinstance(fd.python_type, tuple) else (fd.python_type,)
+                    try:
+                        if len(types) == 1 and types[0] is float:
+                            value = float(value)
+                        elif len(types) == 1 and types[0] is int:
+                            value = int(value)
+                    except (TypeError, ValueError):
+                        pass
+                record[name] = value
+        return record
+
 
 def _project(record: dict[str, Any], fields: tuple[str, ...] | None) -> dict[str, Any]:
     if not fields:
         return record
     return {key: record.get(key) for key in fields if key in record}
+
+
+def _int_or_zero(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
