@@ -12,7 +12,6 @@ from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
 import duckdb
-import pandas as pd
 
 CST = timezone(timedelta(hours=8))  # 中国标准时间，无夏令时
 MARKET = "CN"
@@ -86,19 +85,14 @@ def resolve_year_dbs(root: Path, start: date | None, end: date | None) -> list[P
     return resolve_year_files(root, YEAR_DB, start, end)
 
 
-def read_frame(path: Path, columns: list[str] | None = None) -> pd.DataFrame:
-    """读取单个 parquet 文件为 pandas DataFrame（pyarrow 后端）。"""
-    return pd.read_parquet(path, columns=columns)
-
-
-def read_table(
+def read_rows(
     db_path: Path,
     table: str,
     columns: list[str] | None = None,
     where: str | None = None,
     params: list | None = None,
-) -> pd.DataFrame:
-    """从 duckdb 文件读取单张表（只读，每次调用独立连接）。"""
+) -> list[dict]:
+    """从 duckdb 文件读取单张表为 ``list[dict]``（不经 pandas）。"""
     if not db_path.is_file():
         raise FileNotFoundError(f"duckdb data file not found: {db_path}")
     projection = ", ".join(f'"{c}"' for c in columns) if columns else "*"
@@ -107,7 +101,9 @@ def read_table(
         sql += f" WHERE {where}"
     con = duckdb.connect(str(db_path), read_only=True)
     try:
-        return con.execute(sql, params or []).df()
+        result = con.execute(sql, params or [])
+        names = [d[0] for d in result.description]
+        return [dict(zip(names, row)) for row in result.fetchall()]
     finally:
         con.close()
 
@@ -174,8 +170,7 @@ __all__ = [
     "announcement_close",
     "date_range_days",
     "parse_yyyymmdd",
-    "read_frame",
-    "read_table",
+    "read_rows",
     "resolve_year_dbs",
     "resolve_year_files",
     "session_bounds",

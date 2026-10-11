@@ -22,8 +22,6 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
-
 from tools.data import (
     AdapterDescriptor,
     Bar,
@@ -49,7 +47,7 @@ from data.adapters.workspace_data.reader import (
     announcement_close,
     date_range_days,
     parse_yyyymmdd,
-    read_table,
+    read_rows,
     resolve_year_dbs,
     session_bounds,
     source_revision,
@@ -63,6 +61,9 @@ SCHEMA_VERSION = "1"
 SOURCE = "workspace-parquet"
 
 _BAR_ALIASES = {"ts_code": "instrument_id", "trade_date": "trading_date", "vol": "volume", "amount": "turnover"}
+_DAILY_BASIC_ALIASES = {"ts_code": "instrument_id", "trade_date": "trading_date"}
+_INSTRUMENT_ALIASES = {"ts_code": "instrument_id", "list_date": "listed_date", "delist_date": "delisted_date"}
+_INDUSTRY_ALIASES = {"index_code": "industry_id", "con_code": "instrument_id", "in_date": "valid_from", "out_date": "valid_to"}
 _BAR_CONVERSIONS = {"volume": 100.0, "turnover": 1000.0}  # 手 -> 股，千元 -> 元
 _INDEX_VOLUME_FACTOR = 1.0  # 指数量保留数据源原生单位（参见 mappings）
 
@@ -152,11 +153,11 @@ class WorkspaceCalendarAdapter:
         )
 
     def sessions(self, request: CalendarRequest) -> CalendarBatch:
-        frame = read_table(self._root / REFERENCE_DB, "trade_date")
+        rows = read_rows(self._root / REFERENCE_DB, "trade_date")
         open_days = {
-            parse_yyyymmdd(v)
-            for v, flag in zip(frame["cal_date"], frame["is_open"])
-            if int(flag) == 1
+            parse_yyyymmdd(row.get("cal_date"))
+            for row in rows
+            if int(row.get("is_open")) == 1
         }
         days: list[date] = []
         current = request.start
@@ -257,10 +258,16 @@ class WorkspaceBarAdapter:
     def _intraday_row_to_bar(row: dict[str, Any], day: date, freq: str, step: timedelta, wanted_asset: str | None) -> Any:
         if wanted_asset is not None and ASSET_TYPE_MAP.get(str(row.get("data_type"))) != wanted_asset:
             return None
-        ts = pd.to_datetime(row.get("trade_time"), errors="coerce")
-        if ts is None or ts is pd.NaT:
+        raw_time = row.get("trade_time")
+        if raw_time is None:
             return None
-        interval_end = ts.to_pydatetime().replace(tzinfo=CST)
+        try:
+            interval_end = datetime.strptime(str(raw_time), "%Y-%m-%d %H:%M:%S").replace(tzinfo=CST)
+        except ValueError:
+            try:
+                interval_end = datetime.fromisoformat(str(raw_time)).replace(tzinfo=CST)
+            except ValueError:
+                return None
         prices = [row.get(c) for c in ("open", "high", "low", "close")]
         if any(v is None or v != v for v in prices):
             return None
@@ -321,11 +328,11 @@ class WorkspaceBarAdapter:
 
     def _open_days(self) -> list[date]:
         if self._open_days_cache is None:
-            frame = read_table(self._root / REFERENCE_DB, "trade_date")
+            rows = read_rows(self._root / REFERENCE_DB, "trade_date")
             days = {
-                parse_yyyymmdd(v)
-                for v, flag in zip(frame["cal_date"], frame["is_open"])
-                if int(flag) == 1 and parse_yyyymmdd(v) is not None
+                parse_yyyymmdd(row.get("cal_date"))
+                for row in rows
+                if int(row.get("is_open")) == 1 and parse_yyyymmdd(row.get("cal_date")) is not None
             }
             self._open_days_cache = sorted(days)
         return self._open_days_cache
@@ -362,27 +369,24 @@ class WorkspaceBarAdapter:
             if end_s is not None:
                 conditions.append("trade_date <= ?")
                 params.append(end_s)
-            frame = read_table(db_path, "kline", where=" AND ".join(conditions), params=params).rename(columns=_BAR_ALIASES)
-            # 打包的 kline 表包含多日周期（5d/10d）；
-            # 除非另行指定，本适配器仅提供日线 bar 视图
-            frame = frame[frame["timeframe"] == freq]
-            if wanted_asset is not None:
-                frame = frame[frame["data_type"].map(ASSET_TYPE_MAP) == wanted_asset]
-            if request.instruments is not None:
-                frame = frame[frame["instrument_id"].isin(request.instruments)]
-            # 日线 bar 采用区间重叠语义（与发布版参考适配器一致）：引擎请求
-            # 某一天的 [session.open, session.close]，因此在 trading_date 上
-            # 两个边界均为包含（inclusive）。
-            if start_s is not None:
-                frame = frame[frame["trading_date"] >= start_s]
-            if end_s is not None:
-                frame = frame[frame["trading_date"] <= end_s]
-            before = len(frame)
-            # ETF 同时以 stock 与 fund 两种 data_type 存储；market.bar 主键
-            # 不含 asset_type，因此在边界处去重。
-            frame = frame.drop_duplicates(subset=["instrument_id", "trading_date", "timeframe"], keep="first")
-            dropped += before - len(frame)
-            for row in frame.to_dict("records"):
+            rows = read_rows(db_path, "kline", where=" AND ".join(conditions), params=params)
+            seen: set[tuple] = set()
+            for raw_row in rows:
+                row = {_BAR_ALIASES.get(key, key): value for key, value in raw_row.items()}
+                if wanted_asset is not None and ASSET_TYPE_MAP.get(str(row.get("data_type"))) != wanted_asset:
+                    continue
+                if request.instruments is not None and row.get("instrument_id") not in request.instruments:
+                    continue
+                trading_date_text = str(row.get("trading_date"))
+                if start_s is not None and trading_date_text < start_s:
+                    continue
+                if end_s is not None and trading_date_text > end_s:
+                    continue
+                dedup_key = (row.get("instrument_id"), trading_date_text, freq)
+                if dedup_key in seen:
+                    dropped += 1
+                    continue
+                seen.add(dedup_key)
                 trading_date = parse_yyyymmdd(row.get("trading_date"))
                 if trading_date is None:
                     continue
@@ -438,9 +442,12 @@ class WorkspaceBarAdapter:
         return _batch(ADAPTER_NAME, revision, request, view, tuple(records), warnings=warnings)
 
     def _read_intraday_bars(self, request: DataRequest, view: str, freq: str) -> DataBatch:
-        """日内频率（如 30m）从 per-day ``{MMDD}/kline.parquet`` 读取（统一 kline 存储，timeframe 列）。"""
+        """日内频率（如 30m）整批读取：DuckDB ``read_parquet`` 取行后直接转 Bar（不经过 pandas）。"""
+        import duckdb
+
         wanted_asset = {"market.bar": None, "index.bar": "index", "fund.bar": "fund"}[view]
         step = _intraday_delta(freq)
+        instruments = tuple(str(code) for code in (request.instruments or ()))
         records: list[Bar] = []
         used_files: list[Path] = []
         for day in date_range_days(request.start, request.end):
@@ -448,54 +455,27 @@ class WorkspaceBarAdapter:
             if not path.is_file():
                 continue
             used_files.append(path)
+            where = "timeframe = ?"
+            params: list[Any] = [freq]
+            if instruments:
+                where += f" AND ts_code IN ({','.join('?' * len(instruments))})"
+                params.extend(instruments)
+            path_literal = str(path).replace("'", "''")
+            sql = f"SELECT * FROM read_parquet('{path_literal}') WHERE {where} ORDER BY trade_time, ts_code"
+            con = duckdb.connect()
             try:
-                frame = pd.read_parquet(path, filters=[("timeframe", "==", freq)])
-            except Exception:
-                frame = pd.read_parquet(path)
-                if "timeframe" in frame.columns:
-                    frame = frame[frame["timeframe"] == freq]
-            if frame.empty:
-                continue
-            if request.instruments is not None:
-                frame = frame[frame["ts_code"].isin(request.instruments)]
-            if wanted_asset is not None:
-                frame = frame[frame["data_type"].map(ASSET_TYPE_MAP) == wanted_asset]
-            for row in frame.to_dict("records"):
-                ts = pd.to_datetime(row.get("trade_time"), errors="coerce")
-                if ts is None or ts is pd.NaT:
-                    continue
-                interval_end = ts.to_pydatetime().replace(tzinfo=CST)
-                prices = [row.get(c) for c in ("open", "high", "low", "close")]
-                if any(v is None or v != v for v in prices):
-                    continue
-                raw_volume = row.get("vol")
-                raw_turnover = row.get("amount")
-                volume = float(raw_volume) * _BAR_CONVERSIONS["volume"] if raw_volume == raw_volume and (raw_volume or 0) >= 0 else 0.0
-                turnover = float(raw_turnover) * _BAR_CONVERSIONS["turnover"] if raw_turnover == raw_turnover and (raw_turnover or 0) >= 0 else 0.0
-                records.append(Bar(
-                    schema_version=SCHEMA_VERSION,
-                    event_id=None,
-                    instrument_id=str(row["ts_code"]),
-                    asset_type=ASSET_TYPE_MAP.get(str(row.get("data_type")), "equity"),
-                    effective_time=interval_end,
-                    event_time=interval_end,
-                    available_at=interval_end,
-                    trading_date=day,
-                    source=SOURCE,
-                    quality="valid",
-                    metadata={},
-                    frequency=freq,
-                    interval_start=interval_end - step,
-                    interval_end=interval_end,
-                    open=float(row["open"]),
-                    high=float(row["high"]),
-                    low=float(row["low"]),
-                    close=float(row["close"]),
-                    volume=volume,
-                    turnover=turnover,
-                    is_complete=True,
-                    price_basis="raw",
-                ))
+                result = con.execute(sql, params)
+                names = tuple(d[0] for d in result.description)
+                while True:
+                    rows = result.fetchmany(20_000)
+                    if not rows:
+                        break
+                    for row in rows:
+                        bar = self._intraday_row_to_bar(dict(zip(names, row)), day, freq, step, wanted_asset)
+                        if bar is not None:
+                            records.append(bar)
+            finally:
+                con.close()
         records.sort(key=lambda bar: (bar.instrument_id, bar.interval_end))
         revision = source_revision(used_files) if used_files else "wp-empty"
         return _batch(ADAPTER_NAME, revision, request, view, tuple(records))
@@ -548,16 +528,16 @@ class WorkspaceTableAdapter:
         start_s = to_yyyymmdd(request.start) if request.start is not None else None
         end_s = to_yyyymmdd(request.end) if request.end is not None else None
         for db_path in files:
-            frame = read_table(db_path, "daily_basic").rename(
-                columns={"ts_code": "instrument_id", "trade_date": "trading_date"}
-            )
-            if request.instruments is not None:
-                frame = frame[frame["instrument_id"].isin(request.instruments)]
-            if start_s is not None:
-                frame = frame[frame["trading_date"] >= start_s]
-            if end_s is not None:
-                frame = frame[frame["trading_date"] <= end_s]
-            for row in frame.to_dict("records"):
+            rows = read_rows(db_path, "daily_basic")
+            for raw in rows:
+                row = {_DAILY_BASIC_ALIASES.get(key, key): value for key, value in raw.items()}
+                if request.instruments is not None and row.get("instrument_id") not in request.instruments:
+                    continue
+                trading_date_text = str(row.get("trading_date"))
+                if start_s is not None and trading_date_text < start_s:
+                    continue
+                if end_s is not None and trading_date_text > end_s:
+                    continue
                 trading_date = parse_yyyymmdd(row.get("trading_date"))
                 if trading_date is None:
                     continue
@@ -591,13 +571,12 @@ class WorkspaceTableAdapter:
         db_path = self._root / REFERENCE_DB
         if not db_path.is_file():
             raise FileNotFoundError(f"instrument master not found: {db_path}")
-        frame = read_table(db_path, "stock_basic").rename(
-            columns={"ts_code": "instrument_id", "list_date": "listed_date", "delist_date": "delisted_date"}
-        )
-        if request.instruments is not None:
-            frame = frame[frame["instrument_id"].isin(request.instruments)]
+        frame = read_rows(db_path, "stock_basic")
         records: list[dict[str, Any]] = []
-        for row in frame.to_dict("records"):
+        for raw in frame:
+            row = {_INSTRUMENT_ALIASES.get(key, key): value for key, value in raw.items()}
+            if request.instruments is not None and row.get("instrument_id") not in request.instruments:
+                continue
             listed = parse_yyyymmdd(row.get("listed_date"))
             delisted = parse_yyyymmdd(row.get("delisted_date"))
             available_at = announcement_close(listed) if listed else datetime(1990, 1, 1, 15, 0, tzinfo=CST)
@@ -630,15 +609,14 @@ class WorkspaceTableAdapter:
         db_path = self._root / REFERENCE_DB
         if not db_path.is_file():
             raise FileNotFoundError(f"industry membership not found: {db_path}")
-        frame = read_table(db_path, "sw_industry").rename(
-            columns={"index_code": "industry_id", "con_code": "instrument_id", "in_date": "valid_from", "out_date": "valid_to"}
-        )
-        if request.instruments is not None:
-            frame = frame[frame["instrument_id"].isin(request.instruments)]
-        if "industry_id" in request.filters:
-            frame = frame[frame["industry_id"] == request.filters["industry_id"]]
+        rows = read_rows(db_path, "sw_industry")
         records: list[dict[str, Any]] = []
-        for row in frame.to_dict("records"):
+        for raw in rows:
+            row = {_INDUSTRY_ALIASES.get(key, key): value for key, value in raw.items()}
+            if request.instruments is not None and row.get("instrument_id") not in request.instruments:
+                continue
+            if "industry_id" in request.filters and row.get("industry_id") != request.filters["industry_id"]:
+                continue
             valid_from = parse_yyyymmdd(row.get("valid_from"))
             if valid_from is None:
                 continue
