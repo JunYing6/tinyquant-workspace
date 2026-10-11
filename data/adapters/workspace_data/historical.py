@@ -64,6 +64,12 @@ _BAR_ALIASES = {"ts_code": "instrument_id", "trade_date": "trading_date", "vol":
 _DAILY_BASIC_ALIASES = {"ts_code": "instrument_id", "trade_date": "trading_date"}
 _INSTRUMENT_ALIASES = {"ts_code": "instrument_id", "list_date": "listed_date", "delist_date": "delisted_date"}
 _INDUSTRY_ALIASES = {"index_code": "industry_id", "con_code": "instrument_id", "in_date": "valid_from", "out_date": "valid_to"}
+_FUNDAMENTAL_TABLES = {
+    "fundamental.income": "income_report",
+    "fundamental.balance": "balance_report",
+    "fundamental.cashflow": "cashflow_report",
+}
+_FUNDAMENTAL_REPORT_TYPE = "1"  # tushare report_type=1 合并报表
 _BAR_CONVERSIONS = {"volume": 100.0, "turnover": 1000.0}  # 手 -> 股，千元 -> 元
 _INDEX_VOLUME_FACTOR = 1.0  # 指数量保留数据源原生单位（参见 mappings）
 
@@ -478,7 +484,7 @@ class WorkspaceBarAdapter:
 class WorkspaceTableAdapter:
     """提供 PIT 表数据集（每日估值指标、master 数据、成分归属）。"""
 
-    DATASETS = ("market.daily_metric", "instrument.master", "industry.membership")
+    DATASETS = ("market.daily_metric", "instrument.master", "industry.membership", "fundamental.income", "fundamental.balance", "fundamental.cashflow")
 
     def __init__(self, data_root: str | Path, market: str = MARKET) -> None:
         self._root = Path(data_root)
@@ -490,6 +496,9 @@ class WorkspaceTableAdapter:
                 "market.daily_metric": _capability("market.daily_metric", frequencies=()),
                 "instrument.master": _capability("instrument.master", frequencies=()),
                 "industry.membership": _capability("industry.membership", frequencies=()),
+                "fundamental.income": _capability("fundamental.income", frequencies=()),
+                "fundamental.balance": _capability("fundamental.balance", frequencies=()),
+                "fundamental.cashflow": _capability("fundamental.cashflow", frequencies=()),
             },
             historical_modes=("historical",),
             realtime_modes=(),
@@ -506,6 +515,8 @@ class WorkspaceTableAdapter:
             return self._read_instruments(request)
         if request.dataset == "industry.membership":
             return self._read_industry(request)
+        if request.dataset in _FUNDAMENTAL_TABLES:
+            return self._read_fundamental(request)
         raise ValueError(f"workspace-table adapter does not serve {request.dataset!r}")
 
     def iter(self, request: DataRequest, chunk_size: int = 10_000):
@@ -631,6 +642,61 @@ class WorkspaceTableAdapter:
             )
         records.sort(key=lambda r: (r["industry_id"], r["instrument_id"], r["valid_from"]))
         return _batch(TABLE_ADAPTER_NAME, source_revision([db_path]), request, "industry.membership", tuple(records))
+
+    # -- 三大报表（PIT） ------------------------------------------------------
+
+    def _read_fundamental(self, request: DataRequest) -> DataBatch:
+        """利润表/资产负债表/现金流量表：从 ``reference.duckdb#*_report`` 读（DuckDB），按公告日 PIT。
+
+        ``report_date`` = 报告期(end_date)；``available_at`` = 公告次日收盘(f_ann_date 优先, 回退 ann_date)；
+        只保留合并报表(report_type=1)，同一 (标的, 报告期) 取最新公告。输出数据集的声明字段。
+        """
+        db_path = self._root / REFERENCE_DB
+        if not db_path.is_file():
+            raise FileNotFoundError(f"fundamental table not found: {db_path}")
+        table = _FUNDAMENTAL_TABLES[request.dataset]
+        rows = read_rows(db_path, table)
+        fields = default_catalog().get(request.dataset).fields
+        chosen: dict[tuple[str, date], tuple[datetime, dict[str, Any]]] = {}
+        for raw in rows:
+            if str(raw.get("report_type")) != _FUNDAMENTAL_REPORT_TYPE:
+                continue
+            code = str(raw.get("ts_code"))
+            if request.instruments is not None and code not in request.instruments:
+                continue
+            report_date = parse_yyyymmdd(raw.get("end_date"))
+            if report_date is None:
+                continue
+            ann_date = parse_yyyymmdd(raw.get("f_ann_date")) or parse_yyyymmdd(raw.get("ann_date"))
+            if ann_date is None:
+                continue
+            available_at = announcement_close(ann_date)
+            if request.as_of is not None and available_at > request.as_of:
+                continue
+            key = (code, report_date)
+            previous = chosen.get(key)
+            if previous is None or available_at >= previous[0]:
+                chosen[key] = (available_at, raw)
+        records: list[dict[str, Any]] = []
+        for (code, report_date), (available_at, raw) in chosen.items():
+            record: dict[str, Any] = {
+                "instrument_id": code,
+                "asset_type": "equity",
+                "report_date": report_date,
+                "effective_time": report_date,
+                "available_at": available_at,
+                "source": SOURCE,
+                "quality": "valid",
+                "metadata": {},
+                "revision": str(raw.get("update_flag") or ""),
+            }
+            for name in fields:
+                if name in record:
+                    continue
+                record[name] = raw.get(name)
+            records.append(_project(record, request.fields))
+        records.sort(key=lambda r: (r["instrument_id"], r["report_date"]))
+        return _batch(TABLE_ADAPTER_NAME, source_revision([db_path]), request, request.dataset, tuple(records))
 
 
 def _project(record: dict[str, Any], fields: tuple[str, ...] | None) -> dict[str, Any]:

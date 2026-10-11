@@ -31,9 +31,10 @@ def build_workspace_gateway(
 
     一期绑定：``calendar.session``、``instrument.master``、
     ``industry.membership``、``market.bar``、``index.bar``、``fund.bar``、
-    ``market.daily_metric``、``market.trade``、``market.quote`` 以及
-    ``market.daily_snapshot`` 复合视图。二期数据集（财务、事件、辅助表）以及
-    ``contract_only`` 数据集尚未绑定，请求时以 ``UnsupportedDatasetError`` 失败。
+    ``market.daily_metric``、``market.trade``、``market.quote``、
+    ``fundamental.income``/``balance``/``cashflow`` 以及 ``market.daily_snapshot``
+    复合视图。其余二期数据集（事件、辅助表）以及 ``contract_only`` 数据集尚未绑定，
+    请求时以 ``UnsupportedDatasetError`` 失败。
 
     当提供 ``realtime_client`` 时，``market.trade`` / ``market.quote`` 还会获得由
     :class:`WorkspaceRealtimeAdapter` 提供的实时（push/poll）绑定，这样实盘引擎
@@ -61,6 +62,9 @@ def build_workspace_gateway(
         _bind("market.daily_metric", tables),
         _bind("instrument.master", tables),
         _bind("industry.membership", tables),
+        _bind("fundamental.income", tables),
+        _bind("fundamental.balance", tables),
+        _bind("fundamental.cashflow", tables),
         _bind("market.trade", ticks),
         _bind("market.quote", ticks),
         _bind("market.daily_snapshot", snapshot),
