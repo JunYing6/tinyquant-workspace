@@ -144,22 +144,22 @@ class WorkspaceTickAdapter:
             yield self._batch(request, buffer, [])
 
     def _asset_stream(self, path, day, asset_type, factor, request, instruments, chunk_size, want_trades, want_quotes):
-        """一路资产文件的 DuckDB 流：逐批取、逐行转事件、吐事件。"""
-        con, result, names = self._open_query(path, day, request, instruments)
+        """一路资产文件的 DuckDB 流：Arrow record-batch 分批取、逐行转事件、吐事件。"""
+        con, reader = self._open_query(path, day, request, instruments)
         try:
             counters: dict[str, int] = {}
-            while True:
-                rows = result.fetchmany(chunk_size)
-                if not rows:
-                    return
-                for row in rows:
-                    for event in self._rows_to_events(dict(zip(names, row)), day, asset_type, factor, counters, want_trades, want_quotes, request.as_of):
+            for batch in reader:
+                for row in batch.to_pylist():
+                    for event in self._rows_to_events(row, day, asset_type, factor, counters, want_trades, want_quotes, request.as_of):
                         yield event
         finally:
             con.close()
 
     def _open_query(self, path: Path, day: date, request: DataRequest, instruments: tuple[str, ...]):
-        """DuckDB 查询：按 code + 时间过滤，`ORDER BY time, code` 输出全局时间有序。"""
+        """DuckDB 查询：按 code + 时间过滤，`ORDER BY time, code`；返回 Arrow record-batch reader。
+
+        用 ``.arrow()`` 流式 reader（快且有界），避免 ``fetchmany`` 在此类有序结果上的灾难性开销。
+        """
         import duckdb
 
         first_day = day == (request.start.date() if isinstance(request.start, datetime) else request.start)
@@ -176,9 +176,8 @@ class WorkspaceTickAdapter:
         path_literal = str(path).replace("'", "''")
         sql = f"SELECT * FROM read_parquet('{path_literal}') WHERE {where} ORDER BY time, code"
         con = duckdb.connect()
-        result = con.execute(sql, params)
-        names = tuple(d[0] for d in result.description)
-        return con, result, names
+        reader = con.execute(sql, params).arrow()
+        return con, reader
 
     def _read(self, request: DataRequest, *, want_trades: bool, want_quotes: bool) -> DataBatch:
         if request.start is None or request.end is None:
@@ -197,11 +196,12 @@ class WorkspaceTickAdapter:
                     continue
                 used_files.append(path)
                 factor = _ASSET_FACTOR[asset_type]
-                con, result, names = self._open_query(path, day, request, instruments)
+                con, reader = self._open_query(path, day, request, instruments)
                 try:
                     counters: dict[str, int] = {}
-                    for row in result.fetchmany(20_000):
-                        records.extend(self._rows_to_events(dict(zip(names, row)), day, asset_type, factor, counters, want_trades, want_quotes, request.as_of))
+                    for batch in reader:
+                        for row in batch.to_pylist():
+                            records.extend(self._rows_to_events(row, day, asset_type, factor, counters, want_trades, want_quotes, request.as_of))
                 finally:
                     con.close()
         records.sort(key=lambda r: (r.instrument_id, r.event_time, r.sequence))

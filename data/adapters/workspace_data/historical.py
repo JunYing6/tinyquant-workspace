@@ -235,15 +235,11 @@ class WorkspaceBarAdapter:
             sql = f"SELECT * FROM read_parquet('{path_literal}') WHERE {where} ORDER BY trade_time, ts_code"
             con = duckdb.connect()
             try:
-                result = con.execute(sql, params)
-                names = tuple(d[0] for d in result.description)
+                reader = con.execute(sql, params).arrow()
                 buffer: list[Any] = []
-                while True:
-                    rows = result.fetchmany(chunk_size)
-                    if not rows:
-                        break
-                    for row in rows:
-                        bar = self._intraday_row_to_bar(dict(zip(names, row)), day, freq, step, wanted_asset)
+                for record_batch in reader:
+                    for row in record_batch.to_pylist():
+                        bar = self._intraday_row_to_bar(row, day, freq, step, wanted_asset)
                         if bar is not None:
                             buffer.append(bar)
                     if len(buffer) >= chunk_size:
@@ -464,14 +460,10 @@ class WorkspaceBarAdapter:
             sql = f"SELECT * FROM read_parquet('{path_literal}') WHERE {where} ORDER BY trade_time, ts_code"
             con = duckdb.connect()
             try:
-                result = con.execute(sql, params)
-                names = tuple(d[0] for d in result.description)
-                while True:
-                    rows = result.fetchmany(20_000)
-                    if not rows:
-                        break
-                    for row in rows:
-                        bar = self._intraday_row_to_bar(dict(zip(names, row)), day, freq, step, wanted_asset)
+                reader = con.execute(sql, params).arrow()
+                for record_batch in reader:
+                    for row in record_batch.to_pylist():
+                        bar = self._intraday_row_to_bar(row, day, freq, step, wanted_asset)
                         if bar is not None:
                             records.append(bar)
             finally:
