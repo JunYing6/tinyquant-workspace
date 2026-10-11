@@ -9,11 +9,11 @@ from __future__ import annotations
 from collections import deque
 from typing import Any
 
-from trading_nodes_base.factors import RiskKlineFactor
+from trading_nodes_base.factors import RiskNonIntradayKlineFactor
 from trading_nodes_base.types import KlineBar, RiskSignal
 
 
-class AtrStopRiskFactor(RiskKlineFactor):
+class AtrStopRiskFactor(RiskNonIntradayKlineFactor):
     """ATR 移动止损：价格回撤幅度超过多个 ATR 时发出止损信号。"""
 
     def __init__(self, window: int = 14, multiple: float = 2.0) -> None:

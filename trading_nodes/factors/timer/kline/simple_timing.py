@@ -12,11 +12,11 @@ from collections import deque
 from collections.abc import Sequence
 from typing import Any
 
-from trading_nodes_base.factors import KlineTimingFactor
+from trading_nodes_base.factors import NonIntradayKlineFactor
 from trading_nodes_base.types import KlineBar, SignalIntent
 
 
-class _DailyTimingFactor(KlineTimingFactor):
+class _DailyTimingFactor(NonIntradayKlineFactor):
     """择时因子公共基类：声明无需数据查询，并提供统一的信号构造助手。"""
 
     def get_query_lst(self, date: Any, codes: list[str] | None = None) -> list[Any]:

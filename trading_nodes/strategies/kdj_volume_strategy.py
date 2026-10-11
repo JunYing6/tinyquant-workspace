@@ -17,7 +17,7 @@ from collections import deque
 from collections.abc import Sequence
 from typing import Any, Dict, List, Optional
 
-from trading_nodes_base.factors import KlineTimingFactor
+from trading_nodes_base.factors import NonIntradayKlineFactor
 from trading_nodes_base.methods import BaseTimeSelection
 from trading_nodes_base.strategies import BaseStrategy
 from trading_nodes_base.types import SignalIntent
@@ -25,7 +25,7 @@ from trading_nodes.methods.risk.full_position import FullPositionRisk
 from trading_nodes.methods.selector.fixed import FixedStockPicking
 
 
-class KdjVolumeTimingFactor(KlineTimingFactor):
+class KdjVolumeTimingFactor(NonIntradayKlineFactor):
     frequency = "1d"
     emitted_actions = frozenset({"BUY", "SELL"})
 

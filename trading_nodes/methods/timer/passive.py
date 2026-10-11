@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from trading_nodes_base.factors import KlineTimingFactor
+from trading_nodes_base.factors import NonIntradayKlineFactor
 from trading_nodes_base.types import KlineBar, SignalIntent
 from trading_nodes_base.methods import BaseTimeSelection
 
 
-class NoTradeFactor(KlineTimingFactor):
+class NoTradeFactor(NonIntradayKlineFactor):
     """占位 K 线择时因子：永不产生买卖信号。"""
 
     def __init__(self) -> None:

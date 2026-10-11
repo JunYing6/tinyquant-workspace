@@ -29,7 +29,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import pandas as pd  # type: ignore[import-untyped]
 
-from trading_nodes_base.factors import FloatSelectionFactor, KlineTimingFactor
+from trading_nodes_base.factors import FloatSelectionFactor, NonIntradayKlineFactor
 from trading_nodes_base.methods import BaseStockPicking, BaseTimeSelection
 from trading_nodes_base.strategies import BaseStrategy
 from trading_nodes_base.types import SignalIntent
@@ -192,7 +192,7 @@ class MagicFormulaPicking(BaseStockPicking):
         )
 
 
-class MagicFormulaRebalanceFactor(KlineTimingFactor):
+class MagicFormulaRebalanceFactor(NonIntradayKlineFactor):
     """半年度调仓择时因子：卖出退出名单、买入新入选名单。"""
 
     frequency = "1d"
