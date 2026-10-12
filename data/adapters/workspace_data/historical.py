@@ -424,9 +424,12 @@ class WorkspaceBarAdapter(_RangeMixin):
                 asset_type = ASSET_TYPE_MAP.get(data_type, data_type)
                 volume_factor = _INDEX_VOLUME_FACTOR if asset_type == "index" else _BAR_CONVERSIONS["volume"]
                 interval_start, interval_end = session_bounds(trading_date)
-                # BAR_PIT：行情数据无公告延迟，快速回放以决策时刻（开盘）的
-                # as_of 请求当前会话的 bar——可见性由请求的会话边界界定，
-                # 而非 available_at。available_at 保留在收盘时刻用于溯源。
+                # BAR_PIT：行情数据无公告延迟。带 ``as_of`` 的请求（如盘前声明式取数）
+                # 按可用时点过滤——日线 ``available_at`` 为收盘，故盘前 ``as_of`` 会
+                # 排除当日、只到上一交易日；引擎自身盘前读不传 ``as_of``（需当日 bar
+                # 做日终/喂日线），不受此限。
+                if request.as_of is not None and interval_end > request.as_of:
+                    continue
                 raw_volume = row.get("volume")
                 raw_turnover = row.get("turnover")
                 records.append(
