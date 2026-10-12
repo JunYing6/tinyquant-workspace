@@ -10,7 +10,6 @@ from trading_nodes.strategies.simple_strategies import (
     BreakoutStrategy,
     DualMaStrategy,
     EmptyPositionStrategy,
-    FilterPickStrategy,
     GoldenCrossStrategy,
     MeanReversionStrategy,
     MomentumPickStrategy,
@@ -53,10 +52,6 @@ def build_momentum_pick():
     return MomentumPickStrategy(list(settings.STOCK_POOL)), build_gateway()
 
 
-def build_filter_pick():
-    return FilterPickStrategy(list(settings.STOCK_POOL)), build_gateway()
-
-
 def build_empty_position():
     return EmptyPositionStrategy(list(settings.STOCK_POOL)), build_gateway()
 
@@ -75,7 +70,6 @@ BACKTESTS = [
     {"name": "ATR止损(atr-stop)", "kind": "strategy", "factory": "trading_nodes.backtests:build_atr_stop"},
     {"name": "突破风控(breakout-risk)", "kind": "strategy", "factory": "trading_nodes.backtests:build_breakout_risk"},
     {"name": "动量选股(momentum-pick)", "kind": "strategy", "factory": "trading_nodes.backtests:build_momentum_pick"},
-    {"name": "价格筛选(filter-pick)", "kind": "strategy", "factory": "trading_nodes.backtests:build_filter_pick"},
     {"name": "空仓(empty-position)", "kind": "strategy", "factory": "trading_nodes.backtests:build_empty_position"},
-    {"name": "九策略组合(multi-strategy)", "kind": "stream", "factory": "trading_nodes.backtests:build_stream"},
+    {"name": "八策略组合(multi-strategy)", "kind": "stream", "factory": "trading_nodes.backtests:build_stream"},
 ]

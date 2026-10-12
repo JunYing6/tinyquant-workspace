@@ -7,7 +7,6 @@ from trading_nodes.strategies.simple_strategies import (
     BreakoutStrategy,
     DualMaStrategy,
     EmptyPositionStrategy,
-    FilterPickStrategy,
     GoldenCrossStrategy,
     MeanReversionStrategy,
     MomentumPickStrategy,
@@ -26,7 +25,6 @@ class MultiStrategyStream(BaseStream):
             AtrStopStrategy(),
             BreakoutRiskStrategy(),
             MomentumPickStrategy(),
-            FilterPickStrategy(),
             EmptyPositionStrategy(),
         ]
         super().__init__("multi-strategy", strategies, mind or PerformanceWeightMind())
