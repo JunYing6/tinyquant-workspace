@@ -133,6 +133,11 @@ def source_revision(paths: list[Path]) -> str:
     return "wp-" + digest.hexdigest()[:16]
 
 
+def year_dbs_with_table(root: Path, table: str, start: date | None, end: date | None) -> list[Path]:
+    """解析请求区间内的 year.duckdb，并只保留含 ``table`` 的库（缺表年份跳过）。"""
+    return [p for p in resolve_year_dbs(root, start, end) if table_exists(p, table)]
+
+
 def date_range_days(start: datetime | date | None, end: datetime | date | None) -> list[date]:
     """半开区间 [start, end) 请求窗口覆盖的交易日。
 
@@ -177,4 +182,5 @@ __all__ = [
     "source_revision",
     "table_exists",
     "to_yyyymmdd",
+    "year_dbs_with_table",
 ]

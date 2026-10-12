@@ -53,6 +53,7 @@ from data.adapters.workspace_data.reader import (
     session_bounds,
     source_revision,
     to_yyyymmdd,
+    year_dbs_with_table,
 )
 
 ADAPTER_NAME = "workspace-bar"
@@ -205,7 +206,47 @@ class WorkspaceCalendarAdapter:
         return batch
 
 
-class WorkspaceBarAdapter:
+class _RangeMixin:
+    """共享区间解析：起止日期显式时用显式值，否则按 anchor(+session_window) 经日历换算。"""
+
+    def _resolve_range(self, request: DataRequest) -> tuple[date | None, date | None]:
+        if request.start is not None or request.end is not None:
+            return request.start, request.end
+        anchor = request.anchor
+        if anchor is None:
+            return None, None
+        anchor_d = anchor.date() if isinstance(anchor, datetime) else anchor
+        window = request.session_window
+        if window is None:
+            return anchor_d, anchor_d
+        open_days = self._open_days()
+        if not open_days:
+            return anchor_d, anchor_d
+        import bisect
+
+        idx = bisect.bisect_right(open_days, anchor_d) - 1
+        if idx < 0:
+            return anchor_d, anchor_d
+        before, after = window
+        start_idx = max(idx + before, 0)
+        end_idx = min(idx + after, len(open_days) - 1)
+        if start_idx > end_idx:
+            return anchor_d, anchor_d
+        return open_days[start_idx], open_days[end_idx]
+
+    def _open_days(self) -> list[date]:
+        if self._open_days_cache is None:
+            rows = read_rows(self._root / REFERENCE_DB, "trade_date")
+            days = {
+                parse_yyyymmdd(row.get("cal_date"))
+                for row in rows
+                if int(row.get("is_open")) == 1 and parse_yyyymmdd(row.get("cal_date")) is not None
+            }
+            self._open_days_cache = sorted(days)
+        return self._open_days_cache
+
+
+class WorkspaceBarAdapter(_RangeMixin):
     """提供 bar 系列（market.bar / index.bar / fund.bar）。非 PIT。"""
 
     DATASETS = ("market.bar", "index.bar", "fund.bar")
@@ -322,43 +363,6 @@ class WorkspaceBarAdapter:
             is_complete=True,
             price_basis="raw",
         )
-
-    def _resolve_range(self, request: DataRequest) -> tuple[date | None, date | None]:
-        """解析起止日期，通过日历把 anchor + session_window 换算为具体区间。"""
-        if request.start is not None or request.end is not None:
-            return request.start, request.end
-        anchor = request.anchor
-        if anchor is None:
-            return None, None
-        anchor_d = anchor.date() if isinstance(anchor, datetime) else anchor
-        window = request.session_window
-        if window is None:
-            return anchor_d, anchor_d
-        open_days = self._open_days()
-        if not open_days:
-            return anchor_d, anchor_d
-        import bisect
-
-        idx = bisect.bisect_right(open_days, anchor_d) - 1
-        if idx < 0:
-            return anchor_d, anchor_d
-        before, after = window
-        start_idx = max(idx + before, 0)
-        end_idx = min(idx + after, len(open_days) - 1)
-        if start_idx > end_idx:
-            return anchor_d, anchor_d
-        return open_days[start_idx], open_days[end_idx]
-
-    def _open_days(self) -> list[date]:
-        if self._open_days_cache is None:
-            rows = read_rows(self._root / REFERENCE_DB, "trade_date")
-            days = {
-                parse_yyyymmdd(row.get("cal_date"))
-                for row in rows
-                if int(row.get("is_open")) == 1 and parse_yyyymmdd(row.get("cal_date")) is not None
-            }
-            self._open_days_cache = sorted(days)
-        return self._open_days_cache
 
     # -- bar 系列 -----------------------------------------------------------
 
@@ -502,7 +506,7 @@ class WorkspaceBarAdapter:
     # -- 每日估值指标 ---------------------------------------------------------
 
 
-class WorkspaceTableAdapter:
+class WorkspaceTableAdapter(_RangeMixin):
     """提供 PIT 表数据集（每日估值指标、master 数据、成分归属）。"""
 
     DATASETS = ("market.daily_metric", "instrument.master", "industry.membership", "fundamental.income", "fundamental.balance", "fundamental.cashflow", *_MAPPED_DATASETS)
@@ -549,24 +553,36 @@ class WorkspaceTableAdapter:
         yield self.read(request)
 
     def _read_daily_metric(self, request: DataRequest) -> DataBatch:
-        files = resolve_year_dbs(self._root, request.start, request.end)
+        start_d, end_d = self._resolve_range(request)
+        # PIT：指标按收盘可见；as_of 早于当日收盘时回看上一交易日。
+        lookback_start = start_d
+        if request.as_of is not None and start_d is not None:
+            lookback_start = start_d - timedelta(days=15)
+        files = year_dbs_with_table(self._root, "daily_basic", lookback_start, end_d)
         revision = source_revision(files) if files else "wp-empty"
         if not files:
             return _batch(TABLE_ADAPTER_NAME, revision, request, "market.daily_metric", ())
         records: list[dict[str, Any]] = []
-        start_s = to_yyyymmdd(request.start) if request.start is not None else None
-        end_s = to_yyyymmdd(request.end) if request.end is not None else None
+        start_s = to_yyyymmdd(lookback_start) if lookback_start is not None else None
+        end_s = to_yyyymmdd(end_d) if end_d is not None else None
         for db_path in files:
-            rows = read_rows(db_path, "daily_basic")
+            clauses: list[str] = []
+            params: list = []
+            instruments = tuple(request.instruments) if request.instruments is not None else None
+            if instruments:
+                placeholders = ", ".join("?" for _ in instruments)
+                clauses.append(f"ts_code IN ({placeholders})")
+                params.extend(instruments)
+            if start_s is not None:
+                clauses.append("trade_date >= ?")
+                params.append(start_s)
+            if end_s is not None:
+                clauses.append("trade_date <= ?")
+                params.append(end_s)
+            where = " AND ".join(clauses) if clauses else None
+            rows = read_rows(db_path, "daily_basic", where=where, params=params)
             for raw in rows:
                 row = {_DAILY_BASIC_ALIASES.get(key, key): value for key, value in raw.items()}
-                if request.instruments is not None and row.get("instrument_id") not in request.instruments:
-                    continue
-                trading_date_text = str(row.get("trading_date"))
-                if start_s is not None and trading_date_text < start_s:
-                    continue
-                if end_s is not None and trading_date_text > end_s:
-                    continue
                 trading_date = parse_yyyymmdd(row.get("trading_date"))
                 if trading_date is None:
                     continue
@@ -590,9 +606,24 @@ class WorkspaceTableAdapter:
                         record[column] = bool(int(value))
                     else:
                         record[column] = value
-                records.append(_project(record, request.fields))
+                records.append(record)
+        if request.as_of is not None:
+            # as_of 查询：每标的取最近一个可用交易日（上一交易日）
+            latest: dict[str, dict[str, Any]] = {}
+            for rec in records:
+                code = rec["instrument_id"]
+                current = latest.get(code)
+                if current is None or rec["trading_date"] > current["trading_date"]:
+                    latest[code] = rec
+            records = list(latest.values())
         records.sort(key=lambda r: (r["instrument_id"], r["trading_date"]))
-        return _batch(TABLE_ADAPTER_NAME, revision, request, "market.daily_metric", tuple(records))
+        return _batch(
+            TABLE_ADAPTER_NAME,
+            revision,
+            request,
+            "market.daily_metric",
+            tuple(_project(record, request.fields, "market.daily_metric") for record in records),
+        )
 
     # -- 标的 master ---------------------------------------------------------
 
@@ -627,6 +658,7 @@ class WorkspaceTableAdapter:
                         "available_at": available_at,
                     },
                     request.fields,
+                    "instrument.master",
                 )
             )
         records.sort(key=lambda r: (r["instrument_id"], r["valid_from"] or date.min))
@@ -664,6 +696,7 @@ class WorkspaceTableAdapter:
                         "available_at": available_at,
                     },
                     request.fields,
+                    "industry.membership",
                 )
             )
         records.sort(key=lambda r: (r["industry_id"], r["instrument_id"], r["valid_from"]))
@@ -681,12 +714,19 @@ class WorkspaceTableAdapter:
         if not db_path.is_file():
             raise FileNotFoundError(f"fundamental table not found: {db_path}")
         table = _FUNDAMENTAL_TABLES[request.dataset]
-        rows = read_rows(db_path, table)
+        instruments = tuple(request.instruments) if request.instruments is not None else None
+        clauses: list[str] = []
+        params: list = []
+        if instruments:
+            placeholders = ", ".join("?" for _ in instruments)
+            clauses.append(f"ts_code IN ({placeholders})")
+            params.extend(instruments)
+        clauses.append("report_type = ?")
+        params.append(_FUNDAMENTAL_REPORT_TYPE)
+        rows = read_rows(db_path, table, where=" AND ".join(clauses), params=params)
         fields = default_catalog().get(request.dataset).fields
         chosen: dict[tuple[str, date], tuple[datetime, dict[str, Any]]] = {}
         for raw in rows:
-            if str(raw.get("report_type")) != _FUNDAMENTAL_REPORT_TYPE:
-                continue
             code = str(raw.get("ts_code"))
             if request.instruments is not None and code not in request.instruments:
                 continue
@@ -720,9 +760,15 @@ class WorkspaceTableAdapter:
                 if name in record:
                     continue
                 record[name] = raw.get(name)
-            records.append(_project(record, request.fields))
+            records.append(record)
         records.sort(key=lambda r: (r["instrument_id"], r["report_date"]))
-        return _batch(TABLE_ADAPTER_NAME, source_revision([db_path]), request, request.dataset, tuple(records))
+        return _batch(
+            TABLE_ADAPTER_NAME,
+            source_revision([db_path]),
+            request,
+            request.dataset,
+            tuple(_project(record, request.fields, request.dataset) for record in records),
+        )
 
     # -- 二期数据驱动表（行情资金流/两融/事件/宏观等） -------------------------
 
@@ -737,14 +783,28 @@ class WorkspaceTableAdapter:
         if spec["scope"] == "root":
             db_files = [self._root / REFERENCE_DB]
         else:
-            db_files = [p for p in resolve_year_dbs(self._root, request.start, request.end) if p.is_file()]
+            start_d, end_d = self._resolve_range(request)
+            db_files = year_dbs_with_table(self._root, spec["table"], start_d, end_d)
 
         records: list[dict[str, Any]] = []
         seen: set[tuple] = set()
+        instruments = tuple(request.instruments) if request.instruments is not None else None
+        # 从别名反推该表的代码列（canonical=instrument_id 的 raw 列）；市场级表无代码列则不下推。
+        code_column = next((raw for raw, canonical in aliases.items() if canonical == "instrument_id"), None)
+        clauses: list[str] = []
+        params: list = []
+        if instruments and code_column:
+            placeholders = ", ".join("?" for _ in instruments)
+            clauses.append(f"{code_column} IN ({placeholders})")
+            params.extend(instruments)
+        if level is not None:
+            clauses.append("level = ?")
+            params.append(level)
+        where = " AND ".join(clauses) if clauses else None
         for db_path in db_files:
             if not db_path.is_file():
                 continue
-            for raw in read_rows(db_path, spec["table"]):
+            for raw in read_rows(db_path, spec["table"], where=where, params=params):
                 if level is not None and str(raw.get("level")) != level:
                     continue
                 row = {aliases.get(key, key): value for key, value in raw.items()}
@@ -772,7 +832,7 @@ class WorkspaceTableAdapter:
                 if dedup_key in seen:
                     continue
                 seen.add(dedup_key)
-                records.append(_project(self._mapped_record(definition, row, available_at, asset_default, scale), request.fields))
+                records.append(_project(self._mapped_record(definition, row, available_at, asset_default, scale), request.fields, request.dataset))
         records.sort(key=lambda r: tuple(str(r.get(n) if r.get(n) is not None else "") for n in definition.ordering))
         return _batch(TABLE_ADAPTER_NAME, source_revision(db_files), request, request.dataset, tuple(records))
 
@@ -814,10 +874,17 @@ class WorkspaceTableAdapter:
         return record
 
 
-def _project(record: dict[str, Any], fields: tuple[str, ...] | None) -> dict[str, Any]:
+def _project(record: dict[str, Any], fields: tuple[str, ...] | None, dataset: str | None = None) -> dict[str, Any]:
     if not fields:
         return record
-    return {key: record.get(key) for key in fields if key in record}
+    keep: tuple[str, ...] = ()
+    if dataset is not None:
+        try:
+            keep = tuple(default_catalog().get(dataset).required_fields)
+        except KeyError:
+            keep = ()
+    keys = tuple(dict.fromkeys((*keep, *fields)))
+    return {key: record[key] for key in keys if key in record}
 
 
 def _int_or_zero(value: Any) -> int:

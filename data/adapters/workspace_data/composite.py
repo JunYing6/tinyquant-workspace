@@ -116,4 +116,10 @@ class DailySnapshotCompositeAdapter:
 def _project(record: dict[str, Any], fields: tuple[str, ...] | None) -> dict[str, Any]:
     if not fields:
         return record
-    return {key: record.get(key) for key in fields if key in record}
+    from tools.data.datasets import default_catalog
+    try:
+        keep = tuple(default_catalog().get("market.daily_snapshot").required_fields)
+    except KeyError:
+        keep = ()
+    keys = tuple(dict.fromkeys((*keep, *fields)))
+    return {key: record[key] for key in keys if key in record}
