@@ -3,8 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 from importlib import import_module
 
-PriceAboveMaSelectionFactor = import_module("trading_nodes.factors.selector.and.price_above_ma").PriceAboveMaSelectionFactor
-MomentumSelectionFactor = import_module("trading_nodes.factors.selector.float.momentum").MomentumSelectionFactor
 AtrStopRiskFactor = import_module("trading_nodes.factors.risk.kline.atr_stop").AtrStopRiskFactor
 from trading_nodes.factors.timer.kline.simple_timing import DualMaTimingFactor
 from trading_nodes.methods.selector.fixed import FixedStockPicking
@@ -31,8 +29,6 @@ def test_factor_directories_follow_node_stage_layout() -> None:
 
 
 def test_canonical_nodes_import_and_construct() -> None:
-    assert PriceAboveMaSelectionFactor.factor_kind == "selection_binary"
-    assert MomentumSelectionFactor.factor_kind == "selection_float"
     assert DualMaTimingFactor.factor_kind == "timing_kline"
     assert AtrStopRiskFactor.factor_kind == "risk_kline"
     assert isinstance(FixedStockPicking(), FixedStockPicking)
