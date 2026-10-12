@@ -41,22 +41,33 @@ class DualMaTimingFactor(_DailyTimingFactor):
         if fast_window <= 0 or fast_window >= slow_window:
             raise ValueError("fast_window must be positive and below slow_window")
         self.fast_window, self.slow_window = fast_window, slow_window
-        self.history: dict[str, deque[float]] = {}  # 每只股票近 slow_window 根收盘价
-        self.previous: dict[str, bool] = {}  # 上一根是否处于多头状态（用于捕捉交叉时刻）
+
+    @property
+    def history_lookback_days(self) -> int:
+        return self.slow_window + 1  # 需能算 D-1 与 D-2 两根均线以判交叉
+
+    def _bullish(self, closes: list[float]) -> bool:
+        fast = sum(closes[-self.fast_window:]) / self.fast_window
+        return fast > sum(closes) / len(closes)
+
+    def daily_signal(self, date: Any) -> tuple[dict[str, float], list[SignalIntent]]:
+        prices: dict[str, float] = {}
+        intents: list[SignalIntent] = []
+        need = self.slow_window + 1
+        for code, bars in self.history_bars(date).items():
+            closes = [float(getattr(b, "close")) for b in bars]
+            if len(closes) < need:
+                continue
+            prices[code] = closes[-1]
+            now = self._bullish(closes[-self.slow_window:])
+            before = self._bullish(closes[-need:-1])
+            if now and not before:
+                intents.append(SignalIntent(code, "BUY", date, "dual moving average bullish cross", {}))
+            elif before and not now:
+                intents.append(SignalIntent(code, "SELL", date, "dual moving average bearish cross", {}))
+        return prices, intents
 
     def on_bar(self, bar: KlineBar) -> list[SignalIntent]:
-        values = self.history.setdefault(bar.code, deque(maxlen=self.slow_window))
-        values.append(bar.close)
-        if len(values) < self.slow_window:
-            return []  # 历史数据不足，尚不能计算均线
-        # 多头：快速均线 > 慢速均线
-        bullish = sum(list(values)[-self.fast_window:]) / self.fast_window > sum(values) / len(values)
-        previous = self.previous.get(bar.code, bullish)
-        self.previous[bar.code] = bullish
-        if bullish and not previous:  # 由空转多 -> 金叉买入
-            return [self._intent(bar, "BUY", "dual moving average bullish cross")]
-        if previous and not bullish:  # 由多转空 -> 死叉卖出
-            return [self._intent(bar, "SELL", "dual moving average bearish cross")]
         return []
 
 
