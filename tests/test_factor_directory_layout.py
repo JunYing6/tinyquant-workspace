@@ -39,4 +39,4 @@ def test_canonical_nodes_import_and_construct() -> None:
     assert isinstance(EmptyPositionStrategy().selector, FixedStockPicking)
     assert isinstance(KellyPositionMind(), KellyPositionMind)
     assert isinstance(MarketRegimeMind({"down": [], "sideways": [], "up": []}), MarketRegimeMind)
-    assert len(MultiStrategyStream().strategies) == 8
+    assert len(MultiStrategyStream().strategies) == 7

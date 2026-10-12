@@ -22,7 +22,6 @@ from trading_nodes.strategies.simple_strategies import (
     EmptyPositionStrategy,
     GoldenCrossStrategy,
     MeanReversionStrategy,
-    MomentumPickStrategy,
 )
 from trading_nodes.streams.multi_strategy import MultiStrategyStream
 from engines.fast import FastBacktestEngine
@@ -52,7 +51,7 @@ def test_empty_position_components_are_non_trading() -> None:
     assert strategy.risk_ctrl.on_daily().target_position_ratio == 1.0
 
 
-def test_all_eight_strategies_use_component_instances() -> None:
+def test_all_seven_strategies_use_component_instances() -> None:
     strategy_types = [
         DualMaStrategy,
         BreakoutStrategy,
@@ -60,7 +59,6 @@ def test_all_eight_strategies_use_component_instances() -> None:
         GoldenCrossStrategy,
         AtrStopStrategy,
         BreakoutRiskStrategy,
-        MomentumPickStrategy,
         EmptyPositionStrategy,
     ]
     for strategy_type in strategy_types:
@@ -84,9 +82,9 @@ def test_performance_weight_mind_favors_recently_stronger_strategy() -> None:
     assert abs(sum(weights.values()) - 1.0) < 1e-9
 
 
-def test_multi_strategy_stream_contains_eight_children_and_one_mind() -> None:
+def test_multi_strategy_stream_contains_seven_children_and_one_mind() -> None:
     stream = MultiStrategyStream()
-    assert len(stream.strategies) == 8
+    assert len(stream.strategies) == 7
     assert isinstance(stream.mind, PerformanceWeightMind)
 
 

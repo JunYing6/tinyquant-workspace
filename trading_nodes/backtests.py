@@ -12,7 +12,6 @@ from trading_nodes.strategies.simple_strategies import (
     EmptyPositionStrategy,
     GoldenCrossStrategy,
     MeanReversionStrategy,
-    MomentumPickStrategy,
 )
 from trading_nodes.streams.multi_strategy import MultiStrategyStream
 
@@ -48,10 +47,6 @@ def build_breakout_risk():
     return BreakoutRiskStrategy(list(settings.STOCK_POOL)), build_gateway()
 
 
-def build_momentum_pick():
-    return MomentumPickStrategy(list(settings.STOCK_POOL)), build_gateway()
-
-
 def build_empty_position():
     return EmptyPositionStrategy(list(settings.STOCK_POOL)), build_gateway()
 
@@ -69,7 +64,6 @@ BACKTESTS = [
     {"name": "金叉(golden-cross)", "kind": "strategy", "factory": "trading_nodes.backtests:build_golden_cross"},
     {"name": "ATR止损(atr-stop)", "kind": "strategy", "factory": "trading_nodes.backtests:build_atr_stop"},
     {"name": "突破风控(breakout-risk)", "kind": "strategy", "factory": "trading_nodes.backtests:build_breakout_risk"},
-    {"name": "动量选股(momentum-pick)", "kind": "strategy", "factory": "trading_nodes.backtests:build_momentum_pick"},
     {"name": "空仓(empty-position)", "kind": "strategy", "factory": "trading_nodes.backtests:build_empty_position"},
-    {"name": "八策略组合(multi-strategy)", "kind": "stream", "factory": "trading_nodes.backtests:build_stream"},
+    {"name": "七策略组合(multi-strategy)", "kind": "stream", "factory": "trading_nodes.backtests:build_stream"},
 ]

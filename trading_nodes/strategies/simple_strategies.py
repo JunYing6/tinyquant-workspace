@@ -13,7 +13,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from trading_nodes.methods.selector.fixed import FixedStockPicking
-from trading_nodes.methods.selector.selection import MomentumSelector
 from trading_nodes.methods.timer.kline import (
     BreakoutTiming,
     DualMaTiming,
@@ -86,16 +85,6 @@ class BreakoutRiskStrategy(BaseStrategy):
         super().__init__("breakout-risk", selector, BreakoutTiming(), AtrRiskControl())
 
 
-class MomentumPickStrategy(BaseStrategy):
-    """动量选股策略：动量打分选股 + 被动择时 + 满仓。"""
-
-    supports_fast_backtest = True
-
-    def __init__(self, stock_pool: Sequence[str] | None = None) -> None:
-        selector = MomentumSelector(["000001.SZ", "600000.SH"] if stock_pool is None else stock_pool)
-        super().__init__("momentum-pick", selector, NoTradeTiming(), FullPositionRisk())
-
-
 class EmptyPositionStrategy(BaseStrategy):
     """空仓策略：空股票池，不做任何交易。"""
 
@@ -114,5 +103,4 @@ __all__ = [
     "EmptyPositionStrategy",
     "GoldenCrossStrategy",
     "MeanReversionStrategy",
-    "MomentumPickStrategy",
 ]

@@ -11,7 +11,7 @@ def test_backtests_include_all_expected_items() -> None:
     names = {entry["name"] for entry in BACKTESTS}
     assert "神奇公式(magic-formula)" in names
     assert "双均线(dual-ma)" in names
-    assert "八策略组合(multi-strategy)" in names
+    assert "七策略组合(multi-strategy)" in names
     assert any(entry["kind"] == "stream" for entry in BACKTESTS)
     assert any(entry["kind"] == "strategy" for entry in BACKTESTS)
 

@@ -8,7 +8,6 @@ from .simple_strategies import (
     EmptyPositionStrategy,
     GoldenCrossStrategy,
     MeanReversionStrategy,
-    MomentumPickStrategy,
 )
 
 __all__ = [
@@ -21,5 +20,4 @@ __all__ = [
     "EmptyPositionStrategy",
     "GoldenCrossStrategy",
     "MeanReversionStrategy",
-    "MomentumPickStrategy",
 ]
