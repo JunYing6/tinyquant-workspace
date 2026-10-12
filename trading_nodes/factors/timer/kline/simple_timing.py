@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-from collections import deque
 from collections.abc import Sequence
 from typing import Any
 
@@ -29,6 +28,9 @@ class _DailyTimingFactor(NonIntradayKlineFactor):
         # 显式传 sizing 则保留（透传，不被择时器覆盖）。
         metadata = {"sizing_intent": sizing} if sizing is not None else {}
         return SignalIntent(bar.code, action, bar.end_time, reason, metadata)
+
+    def _intent_at(self, code: str, when: Any, action: str, reason: str) -> SignalIntent:
+        return SignalIntent(code, action, when, reason, {})
 
 
 class DualMaTimingFactor(_DailyTimingFactor):
@@ -79,19 +81,31 @@ class BreakoutTimingFactor(_DailyTimingFactor):
     def __init__(self, window: int = 20) -> None:
         super().__init__("breakout")
         self.window = window
-        self.history: dict[str, deque[float]] = {}
+        self.history_fields = ("close", "high", "low")
+
+    @property
+    def history_lookback_days(self) -> int:
+        return self.window + 1
+
+    def daily_signal(self, date: Any) -> tuple[dict[str, float], list[SignalIntent]]:
+        prices: dict[str, float] = {}
+        intents: list[SignalIntent] = []
+        need = self.window + 1
+        for code, bars in self.history_bars(date).items():
+            if len(bars) < need:
+                continue
+            prior = bars[:-1]  # D-1-window .. D-2
+            cur = bars[-1]     # D-1
+            cur_close = float(getattr(cur, "close"))
+            prices[code] = cur_close
+            if cur_close > max(float(getattr(b, "high")) for b in prior):
+                intents.append(self._intent_at(code, date, "BUY", "daily high breakout"))
+            elif cur_close < min(float(getattr(b, "low")) for b in prior):
+                intents.append(self._intent_at(code, date, "SELL", "daily low breakdown"))
+        return prices, intents
 
     def on_bar(self, bar: KlineBar) -> list[SignalIntent]:
-        values = self.history.setdefault(bar.code, deque(maxlen=self.window + 1))
-        prior = list(values)  # 不含当前根的近 window 根收盘价
-        output: list[SignalIntent] = []
-        if len(prior) >= self.window:
-            if bar.close > max(prior[-self.window:]):
-                output.append(self._intent(bar, "BUY", "daily high breakout"))
-            elif bar.close < min(prior[-self.window:]):
-                output.append(self._intent(bar, "SELL", "daily low breakdown"))
-        values.append(bar.close)
-        return output
+        return []
 
 
 class MeanReversionTimingFactor(_DailyTimingFactor):
@@ -102,22 +116,35 @@ class MeanReversionTimingFactor(_DailyTimingFactor):
     def __init__(self, window: int = 14, oversold: float = 30, overbought: float = 70) -> None:
         super().__init__("mean-reversion")
         self.window, self.oversold, self.overbought = window, oversold, overbought
-        self.history: dict[str, deque[float]] = {}
 
-    def on_bar(self, bar: KlineBar) -> list[SignalIntent]:
-        values = self.history.setdefault(bar.code, deque(maxlen=self.window + 1))
-        values.append(bar.close)
-        if len(values) <= self.window:
-            return []
-        # 用涨跌幅近似计算 RSI：上涨幅度之和 / 涨跌总幅度
-        changes = [b - a for a, b in zip(values, list(values)[1:])]
+    @property
+    def history_lookback_days(self) -> int:
+        return self.window + 1
+
+    @staticmethod
+    def _rsi(closes: list[float]) -> float:
+        changes = [b - a for a, b in zip(closes, closes[1:])]
         gains = sum(max(change, 0) for change in changes)
         losses = sum(max(-change, 0) for change in changes)
-        rsi = 100.0 if losses == 0 else 100.0 - 100.0 / (1.0 + gains / losses)
-        if rsi <= self.oversold:  # 超卖 -> 看涨买入
-            return [self._intent(bar, "BUY", "RSI oversold reversal")]
-        if rsi >= self.overbought:  # 超买 -> 看跌卖出
-            return [self._intent(bar, "SELL", "RSI overbought reversal")]
+        return 100.0 if losses == 0 else 100.0 - 100.0 / (1.0 + gains / losses)
+
+    def daily_signal(self, date: Any) -> tuple[dict[str, float], list[SignalIntent]]:
+        prices: dict[str, float] = {}
+        intents: list[SignalIntent] = []
+        need = self.window + 1
+        for code, bars in self.history_bars(date).items():
+            closes = [float(getattr(b, "close")) for b in bars]
+            if len(closes) < need:
+                continue
+            prices[code] = closes[-1]
+            rsi = self._rsi(closes)
+            if rsi <= self.oversold:
+                intents.append(self._intent_at(code, date, "BUY", "RSI oversold reversal"))
+            elif rsi >= self.overbought:
+                intents.append(self._intent_at(code, date, "SELL", "RSI overbought reversal"))
+        return prices, intents
+
+    def on_bar(self, bar: KlineBar) -> list[SignalIntent]:
         return []
 
 
@@ -131,28 +158,38 @@ class GoldenCrossTimingFactor(_DailyTimingFactor):
         if not fast_window < middle_window < slow_window:
             raise ValueError("moving-average windows must be ascending")
         self.windows = (fast_window, middle_window, slow_window)
-        self.history: dict[str, deque[float]] = {}
-        self.previous: dict[str, bool] = {}
 
-    def on_bar(self, bar: KlineBar) -> list[SignalIntent]:
-        values = self.history.setdefault(bar.code, deque(maxlen=self.windows[-1]))
-        values.append(bar.close)
-        if len(values) < self.windows[-1]:
-            return []
-        numbers = list(values)
-        fast, middle, slow = self.windows
-        # 多头排列：快均线 > 中均线 > 慢均线
-        bullish = (
+    @property
+    def history_lookback_days(self) -> int:
+        return self.windows[-1] + 1
+
+    @staticmethod
+    def _bullish(numbers: list[float], windows: tuple[int, int, int]) -> bool:
+        fast, middle, slow = windows
+        return (
             sum(numbers[-fast:]) / fast
             > sum(numbers[-middle:]) / middle
             > sum(numbers[-slow:]) / slow
         )
-        previous = self.previous.get(bar.code, bullish)
-        self.previous[bar.code] = bullish
-        if bullish and not previous:  # 刚进入多头排列 -> 买入
-            return [self._intent(bar, "BUY", "golden cross alignment")]
-        if previous and not bullish:  # 多头排列被破坏 -> 卖出
-            return [self._intent(bar, "SELL", "golden cross alignment ended")]
+
+    def daily_signal(self, date: Any) -> tuple[dict[str, float], list[SignalIntent]]:
+        prices: dict[str, float] = {}
+        intents: list[SignalIntent] = []
+        need = self.windows[-1] + 1
+        for code, bars in self.history_bars(date).items():
+            closes = [float(getattr(b, "close")) for b in bars]
+            if len(closes) < need:
+                continue
+            prices[code] = closes[-1]
+            now = self._bullish(closes, self.windows)
+            before = self._bullish(closes[:-1], self.windows)
+            if now and not before:
+                intents.append(self._intent_at(code, date, "BUY", "golden cross alignment"))
+            elif before and not now:
+                intents.append(self._intent_at(code, date, "SELL", "golden cross alignment ended"))
+        return prices, intents
+
+    def on_bar(self, bar: KlineBar) -> list[SignalIntent]:
         return []
 
 
